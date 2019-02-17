@@ -1,0 +1,448 @@
+\documentclass{article}
+\usepackage[margin=1.25in]{geometry}
+
+\usepackage{fancyhdr}
+\addtolength{\headheight}{1cm} % make more space for the header
+\pagestyle{fancyplain} % use fancy for all pages except chapter start
+\rhead{\includegraphics[height=1.3cm,keepaspectratio]{logo.jpg}} % right logo
+\renewcommand{\headrulewidth}{0pt} % remove rule below header
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+\title{Students Repeating Math Courses at SLCC}
+\author{SLCC Institutional Research}
+
+\maketitle
+
+\section{Introduction}
+
+How many students repeat math courses at SLCC, who repeats, and with what success?  If the Math Department were to adopt a policy limiting the number of times a student can repeat a course, what should that policy be?  Is there a point at which student performance when repeating a course declines markedly?   We first present descriptive analysis of course repetition, then address these latter questions. 
+
+\section{Summary of Results}
+\begin{enumerate}
+\item Students who repeated courses had less success than those taking the course for the first time.  
+\item Approximately one third of students who failed a course the first time around had passed  by the fourth time they took it.  
+\item Age was a protective factor in course performance. Older students did better than younger students the first time taking a course (they repeated courses less frequently) and they also did better when repeating.
+\item Compared to those who passed the first time, students who repeated courses were more male and less white.  
+\end{enumerate}
+
+\section{Data}
+
+
+<<echo=FALSE, results=hide>>=
+library(dplyr)
+library(ggplot2)
+library(lme4)
+library(arm)
+
+dd <- read.csv("data_oct14.csv")
+
+names(dd) <- tolower(names(dd))
+
+names(dd)
+
+#select stripped down set
+d <- dd %>% dplyr::select(id=math_pidm,
+                          last=last_name,
+                          gender,
+                          ethnicity,
+                          age=current_age,
+                          time_between=time_between_passed,
+                          term=math_term_code,
+                          course=math_num,
+                          grade=math_grade,
+                          prior_grade2 = pre_math_grade,
+                          num_repeat=math_count) %>% #keep this in just for comparison
+  arrange(id, term)
+
+
+head(subset(d, num_repeat>0), 20)
+subset(d, id==2238)
+
+#select classes
+d <- data.frame(subset(d, course==900 |course==950 | course==990 | course==1010 | course ==1030 | course==1040| course==1050))
+d$course <- factor(d$course)
+table(d$course)
+
+#Remove rows with AU, and NS; keep I and treat as E
+table(d$grade)
+d <- subset(d, grade != "AU")
+d <- subset(d, grade != "NS")
+d <- subset(d, grade != "")
+d <- subset(d, grade != "P")
+#d <- subset(d, grade != "I")
+d$grade <- factor(d$grade)
+d$grade <- factor(d$grade, levels= c("A" , "A-" ,"B+",  "B", "B-", "C+",  "C" ,"C-", "D+" , "D" ,"D-", "E",  "I","W") )
+
+#prior grade2--last grade 
+table(d$prior_grade2)
+d$prior_grade2 <- ifelse(d$prior_grade2=="", "none", as.character(d$prior_grade2))
+d <- subset(d, prior_grade2!="NS")
+table(d$prior_grade2)
+
+d$prior_grade2 <- factor(d$prior_grade2, 
+                         levels= c("A" , "A-" ,"B+",  "B", "B-", "C+",  "C" ,"C-", "D+" , "D" ,"D-", "E",  "I","W", "P", "none") )
+                               
+d$pass <- ifelse(d$grade=="P" | 
+                   d$grade=="A" |
+                   d$grade=="A-" |
+                   d$grade=="B+" |
+                   d$grade=="B" |
+                   d$grade=="B-" |
+                   d$grade=="C+" |
+                   d$grade=="C", "pass", "not pass") #cut off point for pass is C
+
+#Because of subsetting by course, need to create new repeat variable (conditional on subseting for course) asnd new prior #grade variable.  The two functions, get_seq, and get_pg, use same arrangement: (id, course, term).  This clusters courses.  There should only be a prior 
+#grade when the rep is > 1, and in that case the prior grade is in the repeated course:  we want to be able take out people who are repeating with a passing grade.
+
+get_seq <- function(x){
+  s <- rle(as.numeric(as.character(x)))
+  vec <- NULL
+  for (i in 1: length(s$lengths)){
+    t <- seq(s$lengths[i])
+    vec <- c(vec,t)
+  }
+  vec
+}
+
+# get_seq(subset(d, id==5697)$course)
+# term <- subset(d, id==5697)$term
+# grade <- subset(d, id==5697)$grade
+# prior_grade2 <- subset(d, id==5697)$prior_grade2
+# 
+get_pg <- function(term, grade, prior_grade2){
+  runs <- rle(term)
+  l <- length(grade)
+  temp_pg <- NULL
+  grade <- as.character(grade)
+  prior_grade2 <- as.character(prior_grade2)
+  pg <- c(prior_grade2[1], grade[-l])
+  
+  for(i in 1: length(runs$lengths)){
+    t <- as.character(rep(pg[i], runs$lengths[i]))
+    temp_pg <- c(temp_pg, t)
+  }
+  temp_pg
+}
+  
+d <- d %>% arrange(id, course, term) %>% 
+  group_by(id) %>%
+  mutate(rep=get_seq(course), pg= get_pg(term, grade, prior_grade2))
+
+ #insert NA in pg where rep ==1
+
+#d$pg[which(d$rep==1)] <- NA
+ 
+
+# subset(d, id==5697)
+# 
+# get_pg(subset(d, id==5697)$term,subset(d, id==5697)$grade, subset(d, id==5697)$prior_grade2) 
+
+
+# head(data.frame(d), 100)
+# names(d)
+#Prior_grade pass= pg_pass
+# d$pg_pass <- ifelse(d$pg=="P" | 
+#                    d$pg=="A" |
+#                    d$pg=="A-" |
+#                    d$pg=="B+" |
+#                    d$pg=="B" |
+#                    d$pg=="B-" |
+#                    d$pg=="C+" |
+#                    d$pg=="C", "pass", "not pass") #cut off point for pass is C
+# 
+
+length(unique(d$id)) #47388unique ids
+
+head(d,20)
+
+#check individual cases
+ids <- which(d$prior_grade2 != d$pg)
+i=1
+
+d[ids[i],]
+tid <- as.numeric(d[ids[i],"id"])
+get_pg(subset(d, id==tid)$term,subset(d, id==tid)$grade,subset(d, id==tid)$prior_grade2)
+subset(d, id==as.numeric(d[ids[i],"id"]))
+i=i+1
+
+
+ 
+ #Gender
+d <- subset(d, gender=="Female" | gender=="Male")
+d$gender <- factor(d$gender)
+
+#Ethnicity
+table(d$ethnicity)
+d <- subset(d, ethnicity != "Not Specified" )
+d <- subset(d,  ethnicity != "Other -- Do not use")
+d$ethnicity <- factor(d$ethnicity)
+levels(d$ethnicity)
+
+length(unique(d$id))#45820
+
+@
+
+
+The dataset included all students who took a math course from Fall 2009 through Summer 2015, excluding concurrent enrollment students.  There were \Sexpr{length(unique(d$id))} unique students represented, with  \Sexpr{nrow(d)} duplicated course enrollments.  
+
+We made the following modelling choices for this analysis:
+
+\begin{itemize}
+\item Passing grade was coded as C or above.  Non-passing grades included C-, D+, D, D-, E, I or W.
+\item Students without gender or ethnic information were excluded from the dataset.
+\item The math courses in this analysis included Math 900, 950, 990, 1010, 1030, 1040, and 1050.  Our intention in selecting these courses was to focus on the core sequence culminating in a QL course:  Math 1030/40/50.
+\item  A course was counted as repeated only if it was repeated in the data set.  Because repetitions prior to Fall 2009 were therefore not counted, the number of repeated courses reported here probably slightly undercounts the actual number.
+\item Some students repeated a course without needing to---what we might call ``vanity repeats.'' Their prior grade in the math class being repeated was C or better.  Because the number of vanity repeats was fairly small (less than 2\% of the sample), they were left in the sample for this analysis.  
+% those who  Prior math grade was simply the last recorded math grade, even if it was a D, E, or W, \emph{in the courses included in the data set}. If, for example, a student got a D in  1010, and later took 1015 and received an A, then for the purposes of this analysis the D was used as the prior grade (because 1015 is not among the core courses considered in this analysis).  In cases where students took multiple math classes in a single semester, the grade in the most advanced math class was used as the prior grade.  
+\item A course was counted as repeated even if an intervening course was taken.  For example, if a student took 1010 and failed it, then took 990 with a passing grade before taking 1010 again, that second time taking 1010 was be counted as a repeat.  
+\item Enrollment counts are duplicated.  The student who repeated a course 10 times would also be counted as having taken the course 1-9 times as well. 
+%The prior grade associated with the repeat of 1010 would be the first grade in 1010.
+\end{itemize}
+
+Note:  We have chosen to use a 1 in the plots below to represent the first time a course was taken.  A 2 represents the second time a course was taken, or, equivalently, first time it was repeated.  
+
+
+\section{Results}
+%\subsection{Enrollment by course}
+
+%The number of duplicated enrollments per course was as follows:
+
+<<echo=F, results=hide>>=
+cols <-c("#00ABE1", "#787878", "#FFCD00", "#833921")
+library(xtable)
+enroll <- d %>% group_by(course) %>% summarize(enrollment=n())
+
+numformat <- function(val) { sub("^(-?)0.", "\\1.", sprintf("%.2f", val)) }
+
+# ggplot(enroll, aes(factor(course), n)) + geom_bar(stat="identity", fill=cols[1]) + xlab("math course")+ylab("count")+
+#   ggtitle("Duplicated Enrollments by Course, AY 2009-10 to AY 2014-15") +
+#   geom_text(aes(n = n, label=n), position = position_dodge(.9), vjust = -.5)
+
+xtable(enroll, caption="Duplicated Enrollments by Course, AY 2009-10 to AY 2014-15")
+
+@
+
+\subsection{Counts of repeated courses}
+
+Here are counts of duplicated students repeating courses.  As noted above, 1 means that the course was being taken for the first time.
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+repeats <- d %>% group_by(rep) %>% tally
+repeats <- repeats %>% mutate(percent=round(n/sum(n),2))
+ggplot(repeats, aes(rep,n))+geom_bar(stat="identity", fill=cols[1]) +xlab("times taking course") + 
+  ggtitle("Students Repeating Math Courses, AY 2009-10 to AY 2014-15") + ylab("count (proportion)")+
+  geom_text(aes( percent = percent, label=paste0("(",numformat(percent),")")), position = position_dodge(.9), vjust = -.5)
+@
+
+The vast majority of students took a course only once, while a small number of students did indeed repeat courses up to 10 times (the maximum was 11) in the 6 year period represented in this dataset. The bars are labelled with the proportion of students at each repeat increment.  Enrollments prior to Fall 2009 were not counted.
+
+How did counts of repeated courses vary by course?    
+
+<<echo=FALSE,fig=TRUE, height=8, width=8>>=
+
+repeats_c <- d %>% group_by(course, rep) %>% tally
+repeats_c <- repeats_c %>% group_by(course) %>% mutate(percent=round(n/sum(n),2))
+
+
+ggplot(subset(repeats_c, rep<5), aes(rep,n))+geom_bar(stat="identity", fill=cols[1]) +xlab("times taking course") + ylab("count (proportion)") + 
+  ggtitle("Students Repeating Math Courses, by Course, AY 2009-10 to AY 2014-15") + 
+  geom_text(aes( percent = percent, label=paste0("(",numformat(percent),")")), position = position_dodge(.9), vjust = -.5)+
+  facet_wrap(~course)+ ylim(c(0, 30000))
+@
+
+
+1010 and 1050 were  repeated more than the other courses, with higher numbers of multiple repeats as well. We truncated the count of times taking the course at 4.  Here is a different view of the same result:
+
+<<echo=FALSE,fig=TRUE, height=8, width=8>>=
+
+cr <- d %>% group_by(course) %>% summarize(avg=round(mean(rep),2), med=median(rep))
+
+# ggplot(cr, aes(course, avg))+geom_bar(stat="identity", fill=cols[1]) +xlab("math course") + 
+#   ylab("average times taken") +
+#   ggtitle("Average times math courses were taken per student, AY 2009-10 to AY 2014-15")+ 
+#   geom_text(aes( avg = avg, label=numformat(round(avg,2))), position = position_dodge(.9), vjust = -.5)
+
+ggplot(data=d, aes(x=course,y=rep)) + geom_jitter(col=cols[1]) +
+  ylab("times taken (average)") +
+  ggtitle("Number of times math courses were taken, AY 2009-10 to AY 2014-15")+ 
+  geom_text(data=cr, aes(x=course, y = 1, label=paste0("(", numformat(round(avg,2)),")")), position = position_dodge(.9), vjust = -.5)
+
+
+@
+
+This plot shows the distribution of repeated courses for different math courses.  Each dot is an enrollment.  The median enrollment in each course is 1, simply because the majority of students only take the course once.  The means exceed 1 because of outliers---particularly obvious in the cases of 1010 and 1050:  a small number of students have taken these courses a large number of times.
+
+%' How often did students who repeated a course once also repeat a different course? In other words, to what extent was repeating itself a repeated behavior?  
+%' 
+%' <<echo=FALSE,fig=TRUE, height=8, width=8>>=
+%' 
+%' rep_mult <- d %>% group_by(id, rep) %>% summarize(count=n()) %>% filter(rep>1)
+%' head(data.frame(rep_mult),30)
+%' 
+%' rep_mult <- rep_mult %>% group_by(rep,count) %>% tally
+%' rep_mult <- rep_mult %>% group_by(rep) %>% mutate(perc=round(n/sum(n),2))
+%' 
+%' @
+%' 
+
+\subsection{Student performance in repeated courses}
+
+What was the distribution of grades among students repeating courses?  Here we include students taking courses for the first time as a reference, and have truncated the count of times taking the course at 4.  %Note:  For the purposes of this comparison, students who were not obligated to repeat the course---vanity repeats---were removed from the dataset.  
+
+<<echo=FALSE,fig=TRUE, height=8, width=8>>=
+
+r <- d %>% group_by(rep, grade) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+#head(data.frame(subset(r, rep==1)),40)
+#nrow(d) -nrow(subset(d, pg_pass=="not pass" | is.na(pg_pass))) 
+ggplot(subset(r, rep<5), aes(grade, count)) +geom_bar(stat="identity", fill=cols[1]) + 
+  facet_wrap(~rep) + 
+  ggtitle("Grade distribution by times taking course, AY 2009-10 to AY 2014-15")
+# ggplot(subset(r, rep<6), aes(grade, perc)) +geom_bar(stat="identity") + 
+#   facet_wrap(~rep)
+@
+
+The shape of the grade distribution changed as students repeated courses:  while the grade distribution for students taking courses for the first was characteristically u-shaped, the other distributions were relatively uniform except for a point mass at E.  Note, however, that some students who were repeating courses did pass them. That point is clearer when we look at grade distributions represented as a percent for each time repeated:
+
+<<echo=FALSE,fig=TRUE, height=8, width=8>>=
+
+#sum(subset(r, rep==1)$perc)
+
+ggplot(subset(r, rep<5), aes(grade, perc*100)) +geom_bar(stat="identity", fill=cols[1]) + ylab("percent")+
+  facet_wrap(~rep) + ggtitle("Percent grade distribution by times taking course, AY 2009-10 to AY 2014-15")
+
+@
+
+The percentage of students getting an A dropped substantially with each course repetition, and the percentage receiving an E went up, but the percentage getting a B or C remained somewhat constant through at least the fourth time taking the course.  
+
+How did success vary by course? 
+
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- d %>% group_by(rep, pass, course) %>% summarize(count=n()) %>% group_by(rep, course) %>% mutate(perc=count/sum(count)) %>% mutate(pass=factor(pass, levels=c("pass", "not pass")))
+
+
+ggplot(subset(r, rep<5), aes(pass, perc)) +geom_bar(stat="identity", fill=cols[1]) + 
+  facet_grid(course~rep)+ ylab("pass rate")+ ylim(c(0,.9))+
+  ggtitle("Pass rate by times taking course and by course, AY 2009-10 to AY 2014-15")+ 
+  geom_text(aes( perc = perc, label=numformat(round(perc,2))), position = position_dodge(.9), vjust = -.5)
+@
+
+Student performance declined with each course repetition, though the magnitude of that decline varied by course.  Let's simplify this plot even further by aggregating over courses, which allows us to see the larger pattern clearly.
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- d %>% group_by(rep, pass) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count)) %>% mutate(pass=factor(pass, levels=c("pass", "not pass")))
+#subset(d, pg_pass=="not pass" | is.na(pg_pass))
+ggplot(subset(r, rep<5), aes(pass, perc)) +geom_bar(stat="identity", fill=cols[1]) + 
+  facet_wrap(~rep)+ ylab("pass rate")+
+  ggtitle("Pass rate by times taking course, AY 2009-10 to AY 2014-15")+ 
+  geom_text(aes( perc = perc, label=numformat(round(perc,2))), position = position_dodge(.9), vjust = -.5)
+@
+
+The larger pattern is that when students were taking a course for the first time more passed than failed.  Thereafter, when repeating the course, more failed than passed.
+
+%' 
+%' <<echo=FALSE, fig=T, height=8, width=8>>=
+%' r <- r %>% mutate(perc= count/sum(count))
+%' ggplot(subset(r, rep<5), aes(pass, count)) +geom_bar(stat="identity", fill=cols[1]) + 
+%'   facet_wrap(~rep)+
+%'   ggtitle("Counts of students passing and not passing times taking course, AY 2009-10 to AY 2014-15")+ 
+%'   geom_text(aes( count = count, label=round(count,2)), position = position_dodge(.9), vjust = -.5)
+%' @
+%' 
+%' The above two plots indicate that (a) the numbers of students repeating courses was quite small relative to the overall population and (b) the percentage of students passing at repetition 1 - 4 was substantially lower than the percentage passing when taking the course for the first time.  
+
+\subsection{Demographic characteristics of repeaters}
+
+What were the demographic characteristics of those who repeated courses?  Age, gender and ethnicity were associated with course repetition.  (Plots showing these relationships are included below in the appendix.)
+
+\begin{itemize}
+\item Students who repeated math courses more than once tended to be disproportionately male. In other words, compared to the first time around, a higher percentage of men repeated math courses.  Students taking a course for the first time were 51\% female and 49\% male, but by the third time there were more men:  49\% female and 51\% male.
+\item Students who repeated math courses tended to be disproportionately younger.  A higher percentage of younger students (defined as the first two quartiles in this dataset, ages 15-24 and 24-27) repeated math courses:   when retaking a course the percentage of students in the older age quartiles dropped (from 22\% and 25\% to 21\%) while the percentage in the younger quartiles increased (from 32\% and 21\% to 35\% and 23\%).  In short, more young students repeat courses.
+\item Generally speaking, disproportionately fewer white students repeated courses compared to students from other ethnic groups, particularly Hispanic/Latino/Latina.  That is,  the percentage of white students repeating math courses declined with each repetition.
+\end{itemize}
+
+\subsection{Demographic characteristics of successful repeaters}
+
+When students repeated courses did their success vary by demographic characteristics?  Age interacted with course repetition in predicting pass rate.  In other words, older students tended not only to repeat courses less frequently, as we saw above, they also did better than younger students when repeating. For example, when taking a course for the second time, a higher proportion of students in the 32-85 age group succeeded (48\% passed vs. 52\% did not pass) as compared to the 15-24 age group, in which a lower proportion succeeded (45\% passed vs. 55\% did not pass).  
+
+
+\section{Discussion}
+
+Several points are worth emphasizing in light of the above material:
+
+\begin{enumerate}
+\item Students who repeated courses had less success than those taking the course for the first time.  The first time around, successes outnumbered failures by a healthy margin.  When courses were repeated, by contrast, failures outnumbered successes.  
+\item Some students successfully converted failures into successes when repeating a course. For the students who repeated a course once, .38 x .46 = .18  of the original failures were converted into successes, .38 x .54 x .4 = .08 were converted into successes when the course was taken for a third time, and  .38 x .54 x .6 x .36 = .04 were converted into successes when the course was taken for the fourth time.  So, by the time students  repeated a course 3 times, one third (.18 + .08 + .04 = .3) of the initial failures had been converted into successes.  For some, then, persistence did pay off eventually.  
+\item However, the rate at which failures were converted into successes diminished rapidly with course repetition.  And while the data provided no obvious  threshold for a policy limiting course retaking (in the form of a discontinuity or step in conversion rates), the number of successes after taking a course 3 times was, in absolute terms, quite small:  \Sexpr{sum(subset(r, rep>3 & pass=="pass")$count)} out of \Sexpr{sum(r$count)} total course enrollments.  It could be argued that the effort that students put into repeatedly taking a course in hopes of passing might be better expended on a different strategy for advancing in the core math sequence.
+\item Age is a protective factor in course performance. Older students do better than younger students the first time taking a course and they also do better when retaking it.
+
+\end{enumerate}
+
+\section{Appendix}
+
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+# library(arm)
+# d$rep_bin <- ifelse(d$rep==1,0,1)
+# summary(glm(rep~gender +age + ethnicity, data=d, family="poisson"))
+# summary(glm(rep_bin~gender +age + ethnicity, data=d, family="binomial"))
+
+
+r <- d %>% group_by(rep, gender) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+
+ggplot(subset(r, rep<5), aes(gender, count)) +geom_bar(stat="identity", fill=cols[1]) + 
+  facet_grid(~rep)+ ylab("count (proportion)")+
+  ggtitle("Math Course Repetition by Gender, AY 2009-10 to AY 2014-15")+
+  geom_text(aes( perc = perc, label=paste0("(",numformat(round(perc,2)),")")), position = position_dodge(.9), vjust = -.5)
+
+
+@
+
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+d$age_cat <- cut(d$age, breaks = quantile(d$age, na.rm=T), keep.lowest=T)
+r <- d  %>% group_by(rep, age_cat) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+
+ggplot(na.omit(subset(r, rep<5)), aes(age_cat, count)) +geom_bar(stat="identity", fill=cols[1]) + 
+  facet_grid(~rep)+ ylab("count (proportion)")+xlab("age")+
+  ggtitle("Math Course Repetition by Age, AY 2009-10 to AY 2014-15")+
+  geom_text(aes( perc = perc, label=paste0("(",numformat(round(perc,2)),")")), position = position_dodge(.9), vjust = -.5)
+
+
+@
+
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- d  %>% group_by(rep, ethnicity) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+
+ggplot(na.omit(subset(r, rep<4 & ethnicity!="Non-Resident Alien" & ethnicity != "More Than One Race")), aes(ethnicity, count)) +geom_bar(stat="identity", fill=cols[1]) + 
+  facet_grid(~rep)+ ylab("count (proportion)")+
+  ggtitle("Math Course Repetition by Ethnicity, AY 2009-10 to AY 2014-15")+
+  geom_text(aes( perc = perc, label=paste0("(",numformat(round(perc,2)),")")), position = position_dodge(.9), vjust = -.5)+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+@
+
+
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+library(arm)
+# d$pass_bin <- ifelse(d$pass=="pass",1,0)
+# summary(glm(pass_bin~rep*gender, data=d, family="binomial"))
+# summary(glm(pass_bin~rep*age, data=d, family="binomial"))
+# summary(glm(pass_bin~rep*ethnicity, data=d, family="binomial"))
+# 
+r <- d %>% group_by(pass,rep, age_cat) %>% summarize(count=n()) %>% group_by(rep, age_cat) %>% mutate(perc=count/sum(count))
+
+ggplot(na.omit(subset(r, rep<5)), aes(age_cat, count)) +geom_bar(stat="identity", fill=cols[1]) + 
+  facet_grid(pass~rep)+
+  ggtitle("Pass Rate (Proportion) by Times Taking Course  and Age Quartile, AY 2009-10 to AY 2014-15")+ xlab("age")+ylab("pass rate")+
+  geom_text(aes( perc = perc, label=paste0("(",numformat(round(perc,2)),")")), position = position_dodge(.9), vjust = -.5)
+
+
+@
+
+\end{document}

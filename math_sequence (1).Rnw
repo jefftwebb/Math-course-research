@@ -1,0 +1,547 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+\title{DRAFT:  Exploratory Analysis of Course Sequences in Math}
+
+\author{Jeff Webb, SLCC Institutional Research}
+\maketitle
+
+\section{Introduction}
+
+What were the most typical math course-taking sequences of SLCC students?  How did these differ by starting course?  What were the most typical sequences for students who completed QL?  Where were the largest loss points in math course sequences?
+
+This paper engages these questions (and more) and is intended to serve to as a starting point for a discussion of math course taking pathways in relation to QL attainment at SLCC.  Accordingly, we focused on descriptive statistics.
+
+NOTE:  This research is preliminary.  The conclusions herein shoud be regarded as tentative and will likely be revised.
+
+\section{Summary of Results}
+
+\section{Data}
+
+The data set included all students who took a math course from Fall 2009 through Summer 2015, excluding concurrent enrollment students. In order to focus on the core sequences to QL completion we have included in the dataset for this analysis only math 900, 920, 950, 990, 1010, 1030, 1040, and 1050.  This means that students who took any courses other than those in their path towards QL have been removed.
+ 
+
+
+
+
+<<echo=FALSE, results=hide>>=
+
+library(TraMineR)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(lme4)
+library(arm)
+
+dd <- read.csv("~/Documents/OneDriveBusiness/math_prereqs/Data-20151103.csv")
+
+names(dd) <- tolower(names(dd))
+
+names(dd)
+
+d <- dd %>% dplyr::select(id=math_pidm,
+                          last=last_name,
+                          term=math_term_code,
+                          course=math_num,
+                          class=math_crn,
+                          grade=math_grade,
+                          prior_grade =pre_math_grade_pass,
+                          gender,
+                          ethnicity, 
+                          age=current_age,
+                          teacher=teacher_pidm, 
+                          time_between=time_between_passed,
+                          accu_score=cpt_arithmetic_score_prior, 
+                          accu_date=cpt_arithmetic_date_prior,
+                          act_score,
+                          act_date,
+                          num_repeat=math_count,
+                          zip=zip_code
+)
+
+#Order by student, term
+d <- d %>% arrange(id, term)
+
+head(d, 100)
+
+#Create year and semester (su, sp, fa) variables
+d$year <- ifelse(d$term==200940 |d$term==201020 |d$term==201030, "AY_2009-10",
+                 ifelse(d$term==201040 |d$term==201120 |d$term==201130, "AY_2010-11",
+                        ifelse(d$term==201140 |d$term==201220 |d$term==201230, "AY_2011-12",
+                               ifelse(d$term==201240 |d$term==201320 |d$term==201330, "AY_2012-13",
+                                      ifelse(d$term==201340 |d$term==201420 |d$term==201430, "AY_2013-14",
+                                             "AY_2014-15")))))
+d$sem <- as.numeric(substr(d$term, 5,6))
+d$sem <- ifelse(d$sem==20, "sp", ifelse(d$sem==30, "su", "fa"))
+
+#select classes
+d <- subset(d, course <= 1050)
+unique(d$course)
+
+d$course <- factor(d$course)
+
+#Remove rows with AU, and NS; keep I and treat as W
+table(d$grade)
+d <- subset(d, grade != "AU")
+d <- subset(d, grade != "NS")
+d <- subset(d, grade != "")
+#d <- subset(d, grade != "P")
+#d <- subset(d, grade != "I")
+d$grade <- factor(d$grade)
+
+round(prop.table(table(d$grade)),2)
+
+#prior grade
+table(d$prior_grade)
+d$prior_grade <- ifelse(d$prior_grade=="", "none", as.character(d$prior_grade))
+d <- subset(d, prior_grade!="NS")
+table(d$prior_grade)
+
+d$pass <- ifelse(d$grade=="P" | 
+                   d$grade=="A" |
+                   d$grade=="A-" |
+                   d$grade=="B+" |
+                   d$grade=="B" |
+                   d$grade=="B-" |
+                   d$grade=="C+" |
+                   d$grade=="C", "pass", "not pass") #cut off point for pass is C
+d$pass_bin <- ifelse(d$pass=="pass",1,0)
+
+#Factor teacher 
+d$teacher <- factor(d$teacher)
+
+#Gender
+d <- subset(d, gender=="Female" | gender=="Male")
+d$gender <- factor(d$gender)
+
+#Ethnicity
+table(d$ethnicity)
+d <- subset(d, ethnicity != "Not Specified" )
+d <- subset(d,  ethnicity != "Other -- Do not use")
+d$ethnicity <- factor(d$ethnicity)
+levels(d$ethnicity)
+
+#Class 
+d$class <- paste0(d$class,d$term)
+head(d$class)
+d$class <- as.numeric(d$class)
+head(d$class)
+
+length(unique(d$id)) #54280 unique ids
+head(d,20)
+
+#Create time between values for ACT and accuplacer.  Accuplacer expiration is 1 year, ACT expiration is 18 months
+library(stringr)
+
+d$accu_date <- as.Date(as.POSIXlt(d$accu_date,format="%m/%d/%Y"))
+d$act_date <- as.Date(as.POSIXlt(d$act_date,format="%m/%d/%Y"))
+
+d$term_month <- ifelse(as.numeric(substring(as.character(d$term), 5,6))==20, "1/10",
+                       ifelse(as.numeric(substring(as.character(d$term), 5,6))==30,"5/20", "8/20"))
+
+d$term_date <- as.Date(as.POSIXlt(paste(d$term_month,"/",as.numeric(substring(as.character(d$term), 1,4)), sep=""),format="%m/%d/%Y"))
+
+d$months_since_accu <- ifelse(is.na(d$time_between) & !is.na(d$accu_score), (d$term_date-d$accu_date)/30, NA)
+d$months_since_accu <- ifelse(d$months_since_accu<1,1,round(d$months_since_accu))
+
+d$months_since_act <- ifelse(is.na(d$time_between) & !is.na(d$act_score), (d$term_date-d$act_date)/30, NA)
+d$months_since_act <- ifelse(d$months_since_act<1,1,round(d$months_since_act))
+
+#track source of time_between
+d$time_between_source <- ifelse(!is.na(d$time_between), "prior course", NA)
+
+#translate these into time between and use the most generous one
+d$time_between_accu <- ifelse(d$months_since_accu <=1, 0,
+                              ifelse(d$months_since_accu <=6, 1,
+                                     ifelse(d$months_since_accu <=12, 2,
+                                            ifelse(d$months_since_accu <=18, 3,
+                                                   ifelse(d$months_since_accu <=24, 4,
+                                                          ifelse(d$months_since_accu <=30, 5,6))))))
+d$time_between_act <- ifelse(d$months_since_act <=6, 0,
+                              ifelse(d$months_since_act <=12, 1,
+                                     ifelse(d$months_since_act <=18, 2,
+                                            ifelse(d$months_since_act <=24, 3,
+                                                   ifelse(d$months_since_act <=30, 4,
+                                                          ifelse(d$months_since_act <=36, 5,6)))))) #6 here is standing in for everything greater, which we won't use because we are nly looking at exp5 and less
+
+head(d[which(d$time_between> d$time_between_act),])
+head(d[which(d$time_between> d$time_between_accu),]) #There are no instances so we don't need to adjust for these
+head(d[which(!is.na(d$time_between) & !is.na(d$time_between_accu)),])
+
+nrow(d[which(is.na(d$time_between) & !is.na(d$time_between_test)),])
+head(d[which(is.na(d$time_between) & !is.na(d$time_between_test)),])
+
+#Replace the NAs in time_between with the values in time_between_test, but first replace NAs in time_between_act and 
+#time_between_accu with large value==100, since need these to be numeric to compare
+d[which(is.na(d$time_between_accu)), "time_between_accu"] <- 100
+d[which(is.na(d$time_between_act)), "time_between_act"] <-100
+d$time_between_test <- ifelse(d$time_between_accu <= d$time_between_act,d$time_between_accu,d$time_between_act)
+
+
+d[which(is.na(d$time_between)), "time_between"] <- ifelse(d[which(is.na(d$time_between)), "time_between_test"] < 100, 
+                                                          d[which(is.na(d$time_between)), "time_between_test"],  
+                                                          d[which(is.na(d$time_between)), "time_between"])
+
+
+d$time_between_source <- ifelse(is.na(d$time_between), "transfer",d$time_between_source)
+d[which(is.na(d$time_between_source)), "time_between_source"] <- ifelse(d[which(is.na(d$time_between_source)), "time_between_act"] < 
+                                                                          d[which(is.na(d$time_between_source)), "time_between_accu"], "act" , "accu")
+
+d <- subset(d, course ==900 | course== 920 | course ==950 | course== 990 | course ==1010 | course== 1030 | course ==1040 | course== 1050 )
+
+find_ql <- function(course,pass_bin) {
+  t <- as.numeric(as.character(course))*pass_bin
+  vec <- ifelse(any(t==1030 | t==1040 | t==1050),1,0)
+vec
+}
+
+find_time <- function(x){
+  vec <- length(as.numeric(as.character(x)))
+  1:vec
+}
+
+d <- d %>% group_by(id) %>% mutate(count=n(), time= find_time(id), ql_complete = find_ql(course,pass_bin))
+
+
+                                                          
+t <- subset(d[,c("id","course", "time")])
+t$course <- as.numeric(as.character(t$course))
+
+w <- spread( t, time, course)
+names(w)[2:15] <- c("one", "two", "three","four","five","six","seven", "eight","nine", "ten","eleven",
+                    "twelve","thirteen","fourteen")
+
+d <- left_join(d, w, by="id")
+
+
+d$final <- ifelse(d$time/d$count==1,1,0)
+
+
+find_qlcourse <- function(course,pass_bin){
+  vec <- as.numeric(as.character(course))*pass_bin
+  pos1030 <- ifelse(length(which(vec==1030))==0,10, which(vec==1030))
+  pos1040 <- ifelse(length(which(vec==1040))==0,10, which(vec==1040))
+  pos1050 <- ifelse(length(which(vec==1050))==0,10, which(vec==1050))
+  c <- as.numeric(ifelse(pos1030==10 & pos1040==10 &pos1050==10 , NA, 
+         ifelse(pos1030 < pos1040 & pos1030 < pos1050, 1030,
+                ifelse(pos1040 < pos1030 & pos1040 < pos1050, 1040,1050))))
+  c
+}
+
+
+d <- d %>% group_by(id) %>% mutate(ql_course= find_qlcourse(course, pass_bin))
+
+head(data.frame(d),20)
+@
+
+\section{Exploring Course Sequences}
+
+\subsection{Counts of course enrollments}
+
+<<echo=FALSE, fig=TRUE, height=8, width=8>>=
+ggplot(t, aes(factor(course))) +geom_bar(col=1, fill=4) + xlab("math course") + 
+  ggtitle("Counts of Duplicated Math Course Enrollments,  AY 2009-10 to AY 2014-15")
+
+@
+
+1010 is clearly the gateway course, with over 30,000 students in the past 6 years, feeding 1030, 1040 and 1050 in (perhaps unfortunately) unequal proportions.  900 is a small course; more students apparently tested into  the higher Dev math courses, 920-990.
+
+\subsection{Counts of sequences}
+
+Here is a plot depicting the frequency of course-taking sequences, along with a supporting table containing the top 10 sequences.
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+w <- spread( t, time, course)
+
+s <- seqdef(w[,-1], gaps="DEL", left="DEL")
+
+seqplot(s, border = NA, title = "Top frequency of sequences", type="f", xlab="semesters")
+
+
+@
+
+<<echo=F, results=verbatim>>=
+seqtab(s, tlim=1:10, format="STS")
+@
+
+In this plot (and those that follow) the width of the bars on the y-axis corresponds to course-taking frequency.  The x-axis represents semesters of taking math, with the maximum value of 14 set by the maximum in the data (the path with 14 semesters is very low frequency and is not represented in this plot).
+Most students started in 1010 or 950 and did not continue (the first two bars moving vertically up the y-axis).  Of those who complete QL, most either start in 1040 or 1050, or start in 1010 and then take 1050.
+
+
+
+What were the most typical course sequences for the different starting courses---900, 920, 950, 990 and 1010?
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+s <- seqdef(w[which(w[,2]==900),-1], gaps="DEL", left="DEL")
+
+seqplot(s, border = NA, title = "Top frequency of sequences for math 900 start", type="f")
+
+
+@
+
+
+<<echo=F, results=verbatim>>=
+seqtab(s, tlim=1:10, format="STS")
+@
+
+Astoundingly, almost half of the students who start in math 900 do not continue. 
+
+Here is a parallel coordinates plot of these pathways.  This type of plot provides an overall view of the different course-taking paths; each line is an individual path, which would have been traveled by---usually---multiple students. The thickness of the lines are frequency-weighted, corresponding to the proportion of students who travelled that path.  In the majority  cases, as we've seen, students  did not continue on from 900.  That non-path is represented by the green square in the lower left starting square.  The plot should also show the 900-900 sequence, though for some reason I've been having trouble getting that to disoplay.
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+seqpcplot(s, title = "Parallel coordinates plot of sequences for 900 start", xlab="semesters", ylab="course")
+@
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+s <- seqdef(w[which(w[,2]==920),-1], gaps="DEL", left="DEL")
+
+seqplot(s, border = NA, title = "Top frequency of sequences for math 920 start", type="f")
+
+
+@
+
+
+<<echo=F, results=verbatim>>=
+seqtab(s, tlim=1:10, format="STS")
+@
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+seqpcplot(s, title = "Parallel coordinates plot of sequences for 920 start", xlab="semesters", ylab="course")
+@
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+s <- seqdef(w[which(w[,2]==950),-1], gaps="DEL", left="DEL")
+
+seqplot(s, border = NA, title = "Top frequency of sequences for math 950 start", type="f")
+
+
+@
+
+
+<<echo=F, results=verbatim>>=
+seqtab(s, tlim=1:10, format="STS")
+@
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+seqpcplot(s, title = "Parallel coordinates plot of sequences for 950 start", xlab="semesters", ylab="course")
+@
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+s <- seqdef(w[which(w[,2]==990),-1], gaps="DEL", left="DEL")
+
+seqplot(s, border = NA, title = "Top frequency of sequences for math 990 start", type="f")
+
+
+@
+
+
+<<echo=F, results=verbatim>>=
+seqtab(s, tlim=1:10, format="STS")
+@
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+seqpcplot(s, title = "Parallel coordinates plot of sequences for 990 start", xlab="semesters", ylab="course")
+@
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+s <- seqdef(w[which(w[,2]==1010),-1], gaps="DEL", left="DEL")
+
+seqplot(s, border = NA, title = "Top frequency of sequences for math 1010 start", type="f")
+
+@
+
+
+<<echo=F, results=verbatim>>=
+seqtab(s, tlim=1:10, format="STS")
+@
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+seqpcplot(s, title = "Parallel coordinates plot of sequences for 1010 start", cex=1.2, xlab="semesters", ylab="course")
+@
+
+For students starting in math at 1010 or below there was a non-continuation rate, \emph{in each course}, of between 30\% and 50\%. This massive attrition after one course almost makes the analysis of sequences irrelevant. 
+
+\subsection{Counts of sequences that lead to QL}
+
+The following plots look at sequences a little differently.  Rather than starting with a particular course, we look at QL completions---course sequences that conclude with passing grades in 1030, 1040 or 1050.
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+t <- subset(d[,c("id","course", "time","ql_complete", "pass_bin")], ql_complete==1)
+t <- t[,-c(4:5)]
+t$course <- as.numeric(as.character(t$course))
+
+w <- spread( t, time, course)
+
+s <- seqdef(w[,-1], gaps="DEL", left="DEL")
+
+seqplot(s, border = NA, title = "Top frequency of sequences", type="f", xlab="semesters")
+
+@
+
+
+<<echo=F, results=verbatim>>=
+seqtab(s, tlim=1:30, format="STS")
+
+@
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+seqpcplot(s, title = "Parallel coordinates plot of sequences for QL attainment", cex=1.2, xlab="semesters", ylab="course")
+@
+
+The strongest, or most populated, pathways are clearly the short ones:  starting in 1040 or 1050, or 1010-1050.  But what are the highest probability pathways?  Let's look at percentage QL completion for a given first course.
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+success <- d %>% group_by(one, ql_complete)  %>% tally %>% mutate(success=n/sum(n))
+
+ggplot(subset(success, ql_complete==1), aes(factor(one), success))+geom_bar(stat="identity")+
+  xlab("first course") + ylab("percent attaining QL")+ ggtitle("Percent of students attaining QL by first course")
+@
+
+
+Clearly, the shorter the path, the higher the probability of QL attainment.  In the case of the shortest paths---i.e., starting and ending with 1030, 1040, or 1050---1050 is the clear loser, which is unfortunate given that, as we see above, the majority of students choose that course to satisfy QL.
+
+What are the paths of those who end up completing in 1030 vs. 1040 vs 1050?
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+success2 <- d  %>% group_by(one, ql_course)  %>% tally 
+success2 <- subset(success2, !is.na(ql_course)) %>% group_by(one) %>% mutate(success=n/sum(n))
+
+ggplot(subset(success2, one < 1030 ), aes(factor(ql_course), success))+geom_bar(stat="identity")+
+  xlab("QL course") + ylab("percent attaining QL")+ ggtitle("Percent of students choosing QL course by first course")+facet_wrap(~one)
+@
+
+This plot suggests that students who start higher in math choose 1050 more frequently as their QL course.
+
+
+
+\subsection{Accuplacer scores?}
+
+The attrition in the developmental courses especially makes one wonder about placement.  Are students prepared? Here are boxplots of the distribution of accuplacer scores (the box represents the interquartile range, IQR, and the black dots represent outliers, observations that are 1.5 times or greater than the upper or lower limit of the IQR).  The courses in the plot below were a student's first course, and the accuplacer scores were the arithmetic scores recorded prior and closest to that first course.
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+
+ggplot(subset(d, (course==900| course==920|course==950| course==990) & time==1), aes(course, accu_score))+ geom_boxplot() +
+
+#+ facet_wrap(~year)+
+  ggtitle("Distribution of Accuplacer Scores by Course")
+
+head(data.frame(subset(d, course==950 & time==1 & accu_score < 35, select=c(id, last, course, term,accu_score, accu_date, act_score, act_date))), 20)
+
+head(data.frame(subset(d, course==990 & time==1 & accu_score < 75, select=c(id, last, course, term,accu_score, accu_date, act_score, act_date))),20)
+# summary(subset(d, course==920 & time==1)$accu_score)
+# summary(subset(d, course==950 & time==1)$accu_score)
+# summary(subset(d, course==990 & time==1)$accu_score)
+# summary(subset(d, course==1010 & time==1)$accu_score)
+
+
+@
+
+A couple of observations about the above plot.  According to the Accuplacer placement guide, students with scores of 34 and below go into 900/20, those with scores between 35-74 go into 950, and those with scores of 75 and above (and elementary algebra scores of 40-54) go into 990.  Higher scores in each course might not be a concern.  Essentially everyone should be able to take 900/20, regardless of their score---there's no minimum.  (More on that in a moment.)  But in  both 950 and 990 we see scores that are lower than should be possible.  The first quartile is just about at the cutoff in 950 and is well below the cutoff in 990.
+
+Still, the 950 and 990 distributions show the effects of the cutoff, with rising IQR.  In contrast, 900 and 920 have no cutoff and it shows. Should they have a cutoff?  Do these courses truly presume no arithmetic knowledge?  There are community education options for math education, which are cheaper than SLCC.  Should low scoring students be advised into those programs first?
+
+Perhaps this distribution differs by year---if, for example, minimum accuplacer scores have been enforced more consistently in recent years.
+
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+
+ggplot(subset(d, (course==900| course==920|course==950| course==990) & time==1), aes(course, accu_score))+ geom_boxplot() + facet_wrap(~year)+
+  ggtitle("Distribution of Accuplacer Scores by Course")
+
+@
+
+
+It looks like the situation has improved in recent years---the boxes in 950 and 990 in the bottom row are more consistently separate than they are in the top---but in every year the minimum accuplacer score of 20 is represented in each course.
+
+Maybe these students with low accuplacer scores are using their ACT scores to qualify instead?
+Here is a snapshot of rows for 950:
+
+<<echo=F, results=verbatim>>=
+
+
+
+head(data.frame(subset(d, course==950 & time==1 & accu_score < 35, select=c(id, last, course, term,accu_score, accu_date, act_score, act_date))), 20)
+@
+
+And here is a snapshot of rows for 950:
+
+
+<<echo=F, results=verbatim>>=
+
+head(data.frame(subset(d, course==990 & time==1 & accu_score < 35, select=c(id, last, course, term,accu_score, accu_date, act_score, act_date))), 20)
+
+@
+
+
+While ACT scores may in some cases explain low accuplacer scores in these courses, but that was clearly not usually the case, as it happened not once in the rows inlcuded above.
+
+Was arithmetic accuplacer score associated with math course success?  Yes, for each math class passing was associated with higher mean accuplacer score. 
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+lp <- d %>% group_by(course, pass) %>% summarize(loss=1-round(mean(final),2), mean_accu=mean(accu_score, na.rm=T))
+
+ggplot(subset(lp, course==900 | course==920 |course==950 |course==990 ), aes(course, mean_accu, group=pass, col=pass)) + geom_line(stat="identity") +ggtitle("Mean accuplacer scores of duplicated students  \n by course and success") + ylab("mean accuplacer score")
+
+@
+
+
+
+
+\subsection{Biggest loss points}
+
+The following plot does not look at sequences but at continuation or persistence rates for students who took that course (which could be their first or one in a series).
+
+<<echo=F, fig=TRUE, height=8, width=8>>=
+
+#names(d) #final means no advancement into the course beyond.
+
+
+ggplot(subset(lp, course==900 | course==920 |course==950 |course==990 |course==1010), aes(course, loss, group=1)) + geom_bar(stat="identity") + facet_wrap(~pass) +ggtitle("Percentage of duplicated students persisting into the next math course \n by course and success") + ylab("percent taking another course")
+
+# summary(glmer(final~gender* age*course+ethnicity+accu_score+time_between+
+#                 (1|id)+(1|teacher), subset(d, pass=="pass")))
+# 
+# summary(glmer(final~gender+ethnicity+age+(1|id)+(1|teacher), subset(d, course==900 & pass=="pass")))
+# summary(glmer(final~gender+ethnicity+(1|id)+(1|teacher), subset(d, course==920 & pass=="pass")))
+# 
+# summary(glmer(final~gender+ethnicity+(1|id)+(1|teacher), subset(d, course==950 & pass=="pass")))
+# 
+# summary(glmer(final~gender+ethnicity+(1|id)+(1|teacher), subset(d, course==990 & pass=="pass")))
+# summary(glmer(final~gender+ethnicity+(1|id)+(1|teacher), subset(d, course==1010 & pass=="pass")))
+
+
+@
+
+In the above plot we see that students who were not successful in 990 or 1010 displayed greater persistence than those in 900/920/950 in persevering and retaking the course (around 50\%).  For those who were successful, a couple of questions:  1.  Why the difference between 900 and 920? How might the differences between these courses explain the difference in student persistence? 920 is a 6 credit hour course.  The difference in persistence is probably explained by differences in the students---those choosing the 6 credit hour course are more directed and motivated.  2.  Why the low continuation rate in 1010?  This despite the impressive tenacity of 1010 students who did not pass the course.  The students who did not pass 1010 retake it at rates of about 50\% whereas those who did pass retake it at rates of only 65\%?
+
+
+
+
+\end{document}

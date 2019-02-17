@@ -1,0 +1,390 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\title{Math Pre-requisite Study:  First Stage}
+
+\author{Jeff Webb, SLCC IR}
+\maketitle
+
+\section{Introduction}
+
+The math department has pre-requisites for (nearly all) math courses.  Pre-requisites are supposed to expire after a year but the department has no way of enforcing these pre-requisites, with the consequence that some students with expired pre-requisites inappropriately enroll in courses.  Math has done some analysis to suggest that as the time since pre-requisites increases, student performance declines.  The department would like this analysis confirmed.  Specifically, the research questions include:
+
+\begin{enumerate}
+\item Does the length of time since completing a pre-requisite impact student performance (measured in terms of passing grade or course completion)?
+\item	If there is an impact, what is the ideal cut off point for expiration to ensure student performance while reasonably accommodating gaps in the sequence. Currently the expiration is set at 2 semesters.
+\end{enumerate}
+
+The purpose of this draft is to:
+\begin{itemize}
+\item Describe modelling choices we've made at the level of the data.
+\item Present visualizations and tables summarizing course performance and course completion in relation to the time between math courses.
+\item Estimate the effect size of enforcing the expiration on pre-requisites.  Suppose that enforcement makes a difference to pass/completion rates---is that  difference likely to be practically meaningful?
+\end{itemize}
+
+Any statistical modelling we decide to do---based on conversations arising from the results here---will be presented in subsequent work.  
+
+\section{Data}
+
+The dataset includes all students who took a math course from Fall 2009 through Summer 2015.  The variable of interest for this analysis was the gap between math classes taken by a student.  Rather than tracking semesters since pre-requisites, we were interested only in the gaps between math classes.  The reasoning here was that even if the last class did not happen to be a pre-requisite, it would nevertheless serve the purpose of a pre-requisite, if passed, by keeping the student engaged in math.  This modeling choice reflects the math department's practice of waiving the pre-requisite in such cases. There were additional modeling choices:
+
+\begin{itemize}
+\item Time between math classes was measured in terms of semesters.  This ``time between'' or gap variable counts the semesters between classes.  The gap would be 0 in the case of adjacent semesters.
+\item  A student's last class was used for calculating the gap variable only if the grade was C or better. 
+\item Students who audited were removed from the dataset.
+\item Students who withdrew (grade of W) were counted as neither completing nor passing their courses.
+\item Non-completion was defined by a grade of W, E or I.
+\item If a student took  two math courses simultaneously, both courses received the same gap count derived from the last passed math class.
+\end{itemize}
+
+Although the data starts with Fall 2009, if a student took a math class before that date, the earlier date was used to calculate the gap variable.  
+
+\subsection{Examples of student records}
+<<data format, echo=FALSE,results=hide>>=
+library(dplyr)
+library(lme4)
+library(ggplot2)
+
+d <- read.csv("Data.csv")
+
+names(d) <- tolower(names(d))
+
+d <- d %>% select(id=math_pidm,
+                  last=last_name,
+                  term=math_term_code,
+                  course=math_num,
+                  class=math_crn,
+                  grade=math_grade,
+                  prior_grade = pre_math_grade,
+                  gender,
+                  ethnicity, 
+                  age=current_age,
+                  teacher=teacher_pidm, 
+                  time_between)
+
+#Order by student, term
+d <- d %>% arrange(id, term)
+
+head(d, 100)
+
+#Create year and semester (su, sp, fa) variables
+d$year <- ifelse(d$term==200940 |d$term==201020 |d$term==201030, "AY_2009-10",
+                            ifelse(d$term==201040 |d$term==201120 |d$term==201130, "AY_2010-11",
+                                   ifelse(d$term==201140 |d$term==201220 |d$term==201230, "AY_2011-12",
+                                          ifelse(d$term==201240 |d$term==201320 |d$term==201330, "AY_2012-13",
+                                                 ifelse(d$term==201340 |d$term==201420 |d$term==201430, "AY_2013-14",
+                                                        "AY_2014-15")))))
+d$sem <- as.numeric(substr(d$term, 5,6))
+d$sem <- ifelse(d$sem==20, "sp", ifelse(d$sem==30, "su", "fa"))
+
+#Remove rows with AU, and NS; keep I and treat as W
+table(d$grade)
+d <- subset(d, grade != "AU")
+d <- subset(d, grade != "NS")
+d$grade <- factor(d$grade)
+
+d$pass <- ifelse(d$grade=="P" | 
+                   d$grade=="A" |
+                   d$grade=="A-" |
+                   d$grade=="B+" |
+                   d$grade=="B" |
+                   d$grade=="B-" |
+                   d$grade=="C+" |
+                   d$grade=="C", "pass", "not pass") #cut off point for pass is C
+d$id <- factor(d$id)
+d$teacher <- factor(d$teacher)
+d <- subset(d, gender=="Female" | gender=="Male")
+d$gender <- factor(d$gender)
+
+table(d$ethnicity)
+d <- subset(d, ethnicity != "Not Specified" )
+d <- subset(d,  ethnicity != "Other -- Do not use")
+d$ethnicity <- factor(d$ethnicity)
+levels(d$ethnicity)
+
+d$pass_bin <- ifelse(d$pass=="pass",1,0)
+
+d$expired <- ifelse(d$time_between > 2, "expired", "not expired")
+
+d$retained_bin <- ifelse(d$grade=="W" | d$grade=="E" | d$grade=="I", 0, 1)
+d$retained <- factor(ifelse(d$retained_bin==1,"retained", "not retained"))
+
+
+length(unique(d$id)) #64307 unique ids
+
+write.csv(d, "formatted_data.csv")
+@
+
+<<snapshots, echo=FALSE, results=verbatim>>=
+
+d <- read.csv("formatted_data.csv", row.names=1)
+
+print(subset(d, id==2288)[,c(1,3:4,6,12)], row.names=F)
+print(subset(d, id==17976)[,c(1,3:4,6,12)], row.names=F)
+print(subset(d, id==5432)[,c(1,3:4,6,12)], row.names=F)
+print(subset(d, id==565348)[,c(1,3:4,6,12)], row.names=F)
+print(subset(d, id==14237)[,c(1,3:4,6,12)], row.names=F)
+print(subset(d, id==565898)[,c(1,3:4,6,12)], row.names=F)
+
+@
+
+Note: The first gap variable in each record is NA unless there was an enrollment that preceded Fall 2009. 
+
+\section{Descriptive statistics}
+
+<<echo=FALSE, results=hide>>=
+t <- d %>% group_by(id) %>% tally
+
+@
+
+
+In this time period \Sexpr{length(unique(d$class))} courses were offered with \Sexpr{nrow(d)} enrollments for \Sexpr{length(unique(d$id))} unique students.  The average number of math classes taken by students was  \Sexpr{round(mean(t$n),2)}.  Here are plots of duplicated students taking math courses from academic year 2009-10 to 2014-15 inclusive, aggregating over years and by year.
+
+<< echo=FALSE, fig=TRUE, height=10, width=10>>=
+
+course_year <- d %>%
+    group_by(course, year) %>% tally
+
+#sum(course_year$n)
+
+ggplot(subset(course_year, course==920 | course==950 | course==990 | course==1010 | course==1020 |course==1030 |course==1040 |course==1050 |course==1060 | course==1210), aes(factor(course), n))  +geom_bar(stat="identity") +
+  ggtitle("Duplicated students taking math courses, AY 2009-10 to 20014-15") + xlab("Math course") + ylab("Number of duplicated students") 
+
+
+@
+
+<< echo=FALSE, fig=TRUE, height=10, width=10>>=
+
+ggplot(subset(course_year, course==920 | course==950 | course==990 | course==1010 | course==1020 |course==1030 |course==1040 |course==1050 |course==1060 | course==1210), aes(year, n, group= factor(course), color = factor(course), linetype=factor(course), shape=factor(course))) +geom_line() + geom_point() +
+  ggtitle("Duplicated students taking math courses by year") + xlab("year") + ylab("Number of duplicated students") 
+
+
+@
+
+\subsection{Course performance}
+
+
+<< echo=FALSE, fig=TRUE, height=10, width=10>>=
+passrate <- na.omit(d) %>% group_by(year, expired) %>% 
+  summarize(Pass = round(mean(pass_bin, na.rm=T)*100,2))
+
+ggplot(passrate, aes(year, Pass, group=expired, color=expired)) + geom_line() +
+  ggtitle("Pass rate by year and pre-requisite expiration status") + scale_color_discrete(name="Status")+ xlab("Year") + ylab("Pass rate (%)") + theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+
+na.omit(d) %>% group_by(expired) %>% summarize(Pass = round(mean(pass_bin, na.rm=T)*100,2))
+
+
+@
+
+
+<<echo=FALSE, fig=TRUE , height=10, width=10>>=
+
+d_agg <- d %>%
+    group_by(time_between, pass) %>% tally
+
+d_agg <- d_agg %>% group_by(time_between) %>%
+  mutate(percent=round(100*n/sum(n),2))
+
+#data.frame(d_agg)
+
+ggplot(na.omit(subset(d, time_between < 20)), aes(factor(time_between), fill = pass)) + geom_histogram(position="dodge") +
+  ggtitle("Duplicated students passing math class by semester gap (truncated at 20 semesters),
+          AY 2009-10 to 20014-15") + 
+ scale_fill_discrete(name="Performance") + xlab("Semester gap in math enrollment")+ ylab("Number of enrollments") 
+
+
+@
+
+The above plot shows counts of passing/failing enrollments by semester gap since last math class.  Students are represented multiple times in this graph, once for each time they take a class after their first.  Note that these counts are not corrected for student ability or teacher influence.  Hence the relationship between gap and passing rate should not be interpreted as a causal one.
+
+Observations:
+\begin{itemize}
+\item The number of successes outnumbers failures for gaps of 0, 1 and 2 semesters.  
+\item For gaps of 3, 4, and 5 the number of failures slightly exceeds the number of successes.  
+\item For gaps of length 6 and larger the number of successes again exceeds failures---surprisingly with a margin that increases with the size of the gap.  
+\end{itemize}
+
+% It appears that there may be three different distributions here, corresponding to different types of students.  
+
+% Speculatively:
+% \begin{itemize}
+% \item Those with large gaps (6 semesters and above) are most likely using accuplacer results to be placed into a math class at the appropriate level.  This may be increasingly the case as the gap increases, which would explain why the success rate increases with the gap.  
+% \item Those with gaps of 3, 4 and 5 semesters are trying the next class in the sequence but with success that diminishes with the gap.  
+% \item Those with gaps of 0, 1, and 2 semesters are also trying the next class in the sequence, and their success also diminishes with the gap, but with more successes than failures.  
+% \end{itemize}
+
+
+<<echo=FALSE, fig=TRUE,  height=10, width=10>>=
+
+
+ggplot(na.omit(subset(d_agg,time_between< 20)), aes(factor(time_between), percent, fill = pass)) + geom_bar(stat="identity", position="dodge") +
+  ggtitle("Percentage of duplicated students passing math class by semester gap (truncated at 20 semesters), 
+          AY 2009-10 to 20014-15") + 
+ scale_fill_discrete(name="Performance") + xlab("Semester gap in math enrollment") + ylab("Percentage of successes") 
+
+
+
+@
+
+This graph shows the same relationship as in the previous graph, but with the y-axis defined by the percentage of successes within each increment in enrollment gap. (That is, the two bars for each gap increment add up to 100.)  While the passing rates on the right hand side (for large gaps) resemble those on the left hand side, it should be kept in mind that the numbers involved are relatively low.
+
+<< echo=FALSE, fig=TRUE, height=10, width=10>>=
+
+ggplot(na.omit(subset(d, time_between <15 & (course==990| course==1010| course==1050 ))), aes(factor(time_between), fill = pass)) + facet_wrap(~course) + geom_histogram(position="dodge") +
+  ggtitle("Duplicated students passing math class by year and semester gap (truncated at 15 semesters),
+          AY 2009-10 to 20014-15") + 
+  scale_fill_discrete(name="Performance") + xlab("Semester gap in math enrollment") + ylab("Number of enrollments") + theme(axis.text=element_text(size=8))
+
+
+@
+
+Observations:
+Pass rates decline more sharply as the gap increases for 1010 and 1050 than for 990.   Failures outnumber successes by gap = 1 in 1010 and by gap = 2 in 1050.
+
+\subsection{Course completion}
+
+Completion is defined by a grade of D- or above.  Grades of E, W, or (rarely) I have been coded as not complete.  
+
+<< echo=FALSE, fig=TRUE, height=10, width=10>>=
+completerate <- na.omit(d) %>% group_by(year, expired) %>% 
+  summarize(Complete = round(mean(retained_bin, na.rm=T)*100,2))
+
+ggplot(completerate, aes(year, Complete, group=expired, color=expired)) + geom_line() +
+  ggtitle("Completion rate by year and pre-requisite expiration status") + scale_color_discrete(name="Status")+ xlab("Year") + ylab("Completion rate (%)") + theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+
+@
+
+
+<<echo=FALSE, fig=TRUE, height=10, width=10>>=
+
+d_agg_ret <- d %>%
+    group_by(time_between, retained) %>% tally
+
+d_agg_ret <- d_agg_ret %>% group_by(time_between) %>%
+  mutate(percent=round(100*n/sum(n),2))
+
+#data.frame(d_agg_ret)
+
+
+ggplot(na.omit(d), aes(factor(time_between), fill = retained)) + geom_histogram(position="dodge") +
+  ggtitle("Duplicated students completing math class by semester gap, AY 2009-10 to 20014-15" ) + 
+ scale_fill_discrete(name="Completion", labels=c("not completed" , "completed")) + xlab("Semester gap in math enrollment")+ ylab("Number of enrollments") 
+
+
+@
+
+<<echo=FALSE, fig=TRUE, height=10, width=10>>=
+
+
+ggplot(na.omit(subset(d_agg_ret,time_between< 30)), aes(factor(time_between), percent, fill = retained)) + geom_bar(stat="identity", position="dodge") +
+  ggtitle("Percentage of duplicated students completing math class by semester gap (truncated at 30 semesters), 
+          AY 2009-10 to 20014-15") + 
+ scale_fill_discrete(name="Completion", labels=c("not completed" , "completed")) + xlab("Semester gap in math enrollment") + ylab("Percentage of enrollments")
+
+
+@
+
+
+<<echo=FALSE, fig=TRUE, height=10, width=10>>=
+
+ggplot(na.omit(subset(d, time_between < 15 & (course==990| course==1010| course==1050 ))), aes(factor(time_between), fill = retained)) + facet_wrap(~course) + geom_histogram(position="dodge") +
+  ggtitle("Duplicated students completing math class by year and semester gap  (truncated at 15 semesters),
+          AY 2009-10 to 20014-15") + 
+  scale_fill_discrete(name="Performance") + xlab("Semester gap in math enrollment") +  ylab("Number of enrollments")
+
+@
+
+
+
+\section{What if? Estimating effect sizes}
+
+How would enforcing the expiration on math pre-requisites impact course performance/completion? This is a question about effect size.  It is worth thinking about  effect size before getting into statistical modelling, since statistically significant effects sometimes aren't large enough to be practically meaningful.  So, let's assume for the sake of argument that we've found statistically significant effects---found a causal relationship between pre-requisite status (expired, not expired) and rates of course performance/completion---such that enforcing expirations would have a positive impact on rates.  How big might that impact be? 
+
+We can use the following conceptual model to do a rough, back-of-the-envelope estimate of the upper and lower bounds on effect sizes.
+
+\begin{itemize}
+\item \emph{Upper bound.} Suppose that students with expired pre-requisites were blocked from enrolling, and as a consequence did not take a math course.  Then the pass/completion rate in any given year would simply be the existing rate for students with non-expired pre-requisites.  If some of students with expired pre-requisites used the accuplacer to enroll in a math class, then overall enrollment would go up over the previous scenario but pass/completion rates probably would not.  That is, such students might do as well as those with non-expired pre-requisites, but there is no reason to think they would do better. 
+
+\item \emph{Lower bound.} Suppose that students with expired pre-requisites were blocked from enrolling, and as a consequence used the accuplacer to qualify for, and take, a math course. Then the pass/completion rate in any given year would be the same as, or possibly better than, the existing rate for all students, expired and non-expired combined,  but certainly no worse.  In this case, enrollment would stay the same as it was before enforcement.   Essentially, this is a business-as-usual scenario.  
+\end{itemize}
+
+If expirations were enforced pass/completion rates should thus  lie somewhere in the range defined by an upper bound equal to the existing rate for students with non-expired pre-requisites and a lower bound equal to the existing rate for all students.
+
+\subsection{Upper and lower bounds for pass rates}
+
+Here is a table summarizing the upper and lower bounds by year for pass rates using the above model:
+
+<<echo=FALSE, results=verbatim>>=
+
+pass_bounds <- na.omit(d) %>% group_by(year) %>% 
+  summarize(lower_bound = round(mean(pass_bin, na.rm=T)*100,2))
+
+
+temp <- na.omit(d) %>% group_by(year, expired) %>% 
+  summarize(upper_bound = round(mean(pass_bin, na.rm=T)*100,2))
+
+temp <- subset(temp, expired=="not expired", select=c("year", "upper_bound"))
+
+pass_bounds <- as.data.frame(left_join(pass_bounds, temp, by="year"))
+
+pass_bounds$range <-abs(pass_bounds[,3]-pass_bounds[,2])
+
+
+print(data.frame(pass_bounds), row.names=F)
+
+@
+
+<<echo=FALSE, results=hide>>=
+m <- NULL
+for (i in 1:1000){
+  m[i] <- max(rnorm(5, mean(pass_bounds$range), sd(pass_bounds$range)))
+}
+
+
+q <- round(as.numeric(quantile(m, probs=c(.025, .975))),2)
+@
+
+The fourth column in this table, range, is the difference between the upper and lower bounds.  It defines the maximum effect for each year.  If expirations had been enforced in the 2009-10 academic year, for example, we would expect pass rates to have ranged between \Sexpr{pass_bounds[1,2]} and \Sexpr{pass_bounds[1,3]}.  In that case the effect size would have been somewhere between 0\%, if the pass rate had come in at the lower bound, and \Sexpr{pass_bounds[1,4]}\%, if it had come in at the upper. (By ``effect size'' in this case we mean the percentage change in the pass rate as a result of enforcing expirations.) 
+
+What sort of effect size should we expect in future years?  Very roughly---our intention here is just to give a sense of the scale of the effect---we could say that the minimum effect size would remain at 0\%, as in the case above, while the maximum might be as high as the maximum we've seen historically: \Sexpr{round((max(pass_bounds[,4])),2)}\%.  
+
+
+\subsection{Effect sizes for completion rates}
+Here is a table summarizing upper and lower bounds by year for completion rates:
+
+<<echo=FALSE, results=verbatim>>=
+
+comp_bounds <- na.omit(d) %>% group_by(year) %>% 
+  summarize(lower_bound = round(mean(retained_bin, na.rm=T)*100,2))
+
+
+temp <- na.omit(d) %>% group_by(year, expired) %>% 
+  summarize(upper_bound = round(mean(retained_bin, na.rm=T)*100,2))
+
+temp <- subset(temp, expired=="not expired", select=c("year", "upper_bound"))
+
+comp_bounds <- data.frame(left_join(comp_bounds, temp, by="year"))
+
+comp_bounds$range <-abs(comp_bounds[,3]-comp_bounds[,2])
+
+
+print(data.frame(comp_bounds), row.names=F)
+
+m <- NULL
+for (i in 1:1000){
+  m[i] <- max(rnorm(5, mean(comp_bounds$range), sd(comp_bounds$range)))
+}
+
+
+q <- round(as.numeric(quantile(m, probs=c(.025, .975))),2)
+
+@
+
+Using the same logic as above: if expirations were enforced we would expect that, based on historical data, effect sizes for future completion rates would have a minimum of 0\% and a maximum that could go as high as the maximum we've seen historically, \Sexpr{round((max(comp_bounds[,4])),2)}\%. 
+
+
+\end{document}

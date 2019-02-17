@@ -1,0 +1,382 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+\title{Correction to the ``Student repeating courses'' Section of ``DRAFT:  Variation in Math Student Pass Rates by Instructor and Section''}
+\author{Jeff Webb, SLCC Institutional Research}
+
+\maketitle
+
+\section{Introduction}
+
+Earlier material presented in ``DRAFT:  Variation in Math Student Pass Rates by Instructor and Section'' (October 2, 2015) on students repeating math classes was discovered to be in error upon review.  This document presents the corrected numbers, which, it should be noted, differ pretty substantially from those reported earlier.
+
+Regrettably, mistakes happen in data analysis. The best course of action is to to have a process of review in place, and through that process to identify mistakes as soon as possible and correct them.
+
+\section{Data}
+
+
+The dataset includes all students who took a math course from Fall 2009 through Summer 2015, excluding concurrent enrollment students.  We made the following modelling choices for this analysis:
+
+\begin{itemize}
+\item Passing grade was coded as C or above.  Non-passing grades included C-, D+, D, D-, E, I or W.
+\item The math courses in this analysis included Math 900, 950, 990, 1010, 1030, 1040, and 1050.
+\item  A course was counted as repeated only if it was repeated in the data set.  Because repetitions prior to Fall 2009 were therefore not counted, the number of repeated courses reported here probably slightly undercounts the actual number.
+\item Prior math grade was simply the last recorded math grade, even if it was a D, E, or W, \emph{in the courses included in the data set}. If, for example, a student got a D in  1010, and later took 1015 and received an A, then for the purposes of this analysis the D was used as the prior grade.  In cases where students took multiple math classes in a single semester, the grade in the most advanced math class was used as the prior grade.  
+\end{itemize}
+
+
+<<echo=FALSE, results=hide>>=
+library(dplyr)
+library(ggplot2)
+library(lme4)
+library(arm)
+
+# dd <- read.csv("data_oct14.csv")
+# 
+# names(dd) <- tolower(names(dd))
+# 
+# names(dd)
+# 
+# #select stripped down set
+# d <- dd %>% dplyr::select(id=math_pidm,
+#                           last=last_name,
+#                           gender,
+#                           ethnicity,
+#                           age=current_age,
+#                           time_between=time_between_passed,
+#                           term=math_term_code,
+#                           course=math_num,
+#                           grade=math_grade,
+#                           prior_grade2 = pre_math_grade,
+#                           num_repeat=math_count) #keep this in just for comparison
+# 
+# #select classes
+# d <- data.frame(subset(d, course==900 |course==950 | course==990 | course==1010 | course ==1030 | course==1040| course==1050))
+# d$course <- factor(d$course)
+# table(d$course)
+# 
+# #Remove rows with AU, and NS; keep I and treat as W
+# table(d$grade)
+# d <- subset(d, grade != "AU")
+# d <- subset(d, grade != "NS")
+# d <- subset(d, grade != "")
+# d <- subset(d, grade != "P")
+# #d <- subset(d, grade != "I")
+# d$grade <- factor(d$grade)
+# d$grade <- factor(d$grade, levels= c("A" , "A-" ,"B+",  "B", "B-", "C+",  "C" ,"C-", "D+" , "D" ,"D-", "E",  "I","W") )
+# 
+# #prior grade2--last grade 
+# table(d$prior_grade2)
+# d$prior_grade2 <- ifelse(d$prior_grade2=="", "none", as.character(d$prior_grade2))
+# d <- subset(d, prior_grade2!="NS")
+# table(d$prior_grade2)
+# 
+# d$prior_grade2 <- factor(d$prior_grade2, 
+#                          levels= c("A" , "A-" ,"B+",  "B", "B-", "C+",  "C" ,"C-", "D+" , "D" ,"D-", "E",  "I","W", "P", "none") )
+#                                
+# d$pass <- ifelse(d$grade=="P" | 
+#                    d$grade=="A" |
+#                    d$grade=="A-" |
+#                    d$grade=="B+" |
+#                    d$grade=="B" |
+#                    d$grade=="B-" |
+#                    d$grade=="C+" |
+#                    d$grade=="C", "pass", "not pass") #cut off point for pass is C
+# 
+# #Calc repeat variable and pg variable
+# get_seq <- function(x){
+#   s <- rle(as.numeric(as.character(x)))
+#   vec <- NULL
+#   for (i in 1: length(s$lengths)){
+#     t <- seq(s$lengths[i])
+#     vec <- c(vec,t)
+#   }
+#   vec
+# }
+# 
+# get_pg <- function(term, grade, prior_grade2){
+#   runs <- rle(term)
+#   l <- length(grade)
+#   temp_pg <- NULL
+#   grade <- as.character(grade)
+#   prior_grade2 <- as.character(prior_grade2)
+#   pg <- c(prior_grade2[1], grade[-l])
+#   
+#   for(i in 1: length(runs$lengths)){
+#     t <- as.character(rep(pg[i], runs$lengths[i]))
+#     temp_pg <- c(temp_pg, t)
+#   }
+#   temp_pg
+# }
+#   
+#   
+#  
+# 
+# subset(d, id==5697)
+# 
+# get_pg(subset(d, id==5697)$term,subset(d, id==5697)$grade, subset(d, id==5697)$prior_grade2) 
+# 
+# 
+# #data must be arranged differently for the two analyses
+# 
+# #for repeat
+# d <- d %>% arrange(id, course, term)
+# 
+# ids <- unique(d$id)
+# vec_rep <- NULL
+# for (i in 1: length(ids)){
+#   #temp <- get_seq(subset(d, id==ids[i])$course)
+#   data <- d[which(d$id==ids[i]),]
+#   temp_rep <- get_seq(data$course)
+#   vec_rep <- c(vec_rep,temp_rep)
+#   cat(i, "\r")
+# }
+# d$rep <- vec_rep
+# d$rep <- d$rep-1
+# 
+# head(d)
+# 
+# #for prior grade
+# d <- d %>% arrange(id, term)
+# vec_pg <- NULL
+# for (i in 1: length(ids)){
+#   data <- d[which(d$id==ids[i]),]
+#   temp_pg <- get_pg(data$term, data$grade, data$prior_grade2)
+#   vec_pg <- c(vec_pg,temp_pg)
+#   cat(i, "\r")
+# }
+# d$pg <- vec_pg
+# 
+# 
+# get_pg(subset(d, id==5697)$term,subset(d, id==5697)$grade, subset(d, id==5697)$prior_grade2) 
+# 
+# head(d, 100)
+# names(d)
+# #Prior_grade pass= pg_pass
+# d$pg_pass <- ifelse(d$pg=="P" | 
+#                    d$pg=="A" |
+#                    d$pg=="A-" |
+#                    d$pg=="B+" |
+#                    d$pg=="B" |
+#                    d$pg=="B-" |
+#                    d$pg=="C+" |
+#                    d$pg=="C", "pass", "not pass") #cut off point for pass is C
+# 
+# 
+# length(unique(d$id)) #51140unique ids
+# 
+# head(d,20)
+# 
+# ids <- which(d$prior_grade2 != d$pg)
+# i=1
+# 
+# d[ids[i],]
+# subset(d, id==d[ids[i],"id"])
+# i=i+1
+# 
+# write.csv(d, "repeaters.csv")
+
+d <- read.csv("repeaters.csv")
+d <- d[,-1]
+ head(d)
+ 
+ #Gender
+d <- subset(d, gender=="Female" | gender=="Male")
+d$gender <- factor(d$gender)
+
+#Ethnicity
+table(d$ethnicity)
+d <- subset(d, ethnicity != "Not Specified" )
+d <- subset(d,  ethnicity != "Other -- Do not use")
+d$ethnicity <- factor(d$ethnicity)
+levels(d$ethnicity)
+
+@
+
+
+<<echo=FALSE, results=hide>>=
+ 
+ #modeling
+#  names(d)
+#  display(m1 <- lm(rep~1, data=d))
+#  display(m2 <- lm(rep~pg, data=d))
+#  anova(m1,m2)
+#  
+#  display(m3 <- lm(rep~pg+gender, data=d))
+#  anova(m3,m2)
+#  
+#  display(m4 <- lm(rep~pg+gender+ethnicity, data=d))
+#  anova(m3,m4)
+#  
+#  summary(m5 <- lm(rep~pg+gender+ethnicity+rescale(age), data=d))
+#  anova(m5,m4)
+ 
+
+@
+
+There were \Sexpr{length(unique(d$id))} unique students represented in the data set, with a total of \Sexpr{nrow(d)} course enrollments.  The number of enrollments per course was as follows:
+
+<<echo=F, fig=T, height=8, width=8>>=
+
+enroll <- d %>% group_by(course) %>% tally
+ggplot(enroll, aes(factor(course), n)) + geom_bar(stat="identity") + xlab("course")+
+  ggtitle("Course enrollment represented in this data set, \n AY 2009-10 to AY 2014-15")
+
+@
+
+
+\section{Results: Students Repeating Courses}
+
+Here are counts of repeated courses (0 means that the course was being taken for the first time):
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+ggplot(d, aes(factor(rep)))+geom_histogram() +xlab("Times repeating course") + 
+  ggtitle("Counts of repeated courses")
+@
+
+(A small number of students did indeed repeat courses up to 10 times in the 6 year period represented in this dataset.)  
+
+How were student grades impacted by course repetition?
+
+<<echo=FALSE,fig=TRUE, height=8, width=8>>=
+
+
+
+r <- d %>% group_by(rep, grade) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+#head(data.frame(subset(r, rep==1)),40)
+ggplot(subset(r, rep<6), aes(grade, count)) +geom_bar(stat="identity") + 
+  facet_wrap(~rep) +
+  ggtitle("Grade distribution by number of times repeating")
+# ggplot(subset(r, rep<6), aes(grade, perc)) +geom_bar(stat="identity") + 
+#   facet_wrap(~rep)
+@
+
+The shape of the grade distribution changed as students repeated courses, but not as dramatically as we reported previously.
+
+Here are grade distributions represented as a percentage for each time repeated:
+
+<<echo=FALSE,fig=TRUE, height=8, width=8>>=
+
+#sum(subset(r, rep==1)$perc)
+
+ggplot(subset(r, rep<6), aes(grade, perc)) +geom_bar(stat="identity") + ylab("percent")+
+  facet_wrap(~rep) + ggtitle(" Percent grade distribution by number of times repeating")
+@
+
+In the above graph we can see that percentage of students getting an A dropped substantially with course repetition, the percentage receiving an E went up, but the percentage getting a B or C remained somewhat constant through at least repetition = 3.
+
+How was the grade distribution for each time repeating a course affected by prior grade performance in that course?  The following plot summarizes prior grade performance as pass/not pass.
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- d %>% group_by(rep, grade, pg_pass) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+r <- subset(r, !is.na(pg_pass))
+#head(data.frame(r),40)
+ggplot(subset(r, rep<6 ), aes(grade, count))  +geom_bar(stat="identity") + 
+  facet_grid(pg_pass~rep) + ggtitle("Grade distribution by number of times repeating course and \n by prior grades > C (pass) and < C (not pass)")
+
+
+
+@
+
+We can see that students sometimes repeated a course without being obligated to. Here is the same plot, but with grade distribution represented as a percentage for each time repeating a course.
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- d %>% group_by(rep, grade, pg_pass) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+r <- subset(r, !is.na(pg_pass))
+
+
+ggplot(subset(r, rep<6), aes(grade, perc)) +geom_bar(stat="identity") + 
+  facet_grid(pg_pass~rep)+ggtitle("Percent grade distribution by number of times repeating course and \n by prior grades > C (pass) and < C (not pass)")
+@
+
+(For subsequent plots we will exclude students who were repeating courses they passed ---the bottom panel in the above plot---so as to focus on the performance of students who were required to repeat the course.)
+
+Note that with each time repeating a course through repetition = 4, the percentage of students failing the course rose
+
+How did grade distributions vary by math course?
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- subset(d, pg_pass=="pass") %>% group_by(rep, grade, course) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+
+ggplot(subset(r, rep<6), aes(grade, count)) +geom_bar(stat="identity") + 
+  facet_grid(course~rep) +
+ ggtitle("Grade distribution by number of times repeating and math course")
+
+@
+
+We can simplify the above plot by summarizing the grade distribution as pass rates.
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- subset(d, pg_pass=="pass") %>% group_by(rep, pass, course) %>% summarize(count=n()) %>% group_by(rep, course) %>% mutate(perc=count/sum(count))
+
+ggplot(subset(r, rep<6), aes(pass, perc)) +geom_bar(stat="identity") + 
+  facet_grid(course~rep)+ ylab("pass rate")+
+  ggtitle("Pass rate by number of times repeating course and math course")
+@
+
+The above plot makes it clear that students actually do reasonably well when repeating classes (except in the case of 1030, where passing initially appears to be fairly easy). The percentages of those passing who were repeating the course for the first time were greater than or equal to the percentage of those passing when taking the course for the first time.
+
+Let's simplify this plot even further by aggregating over courses.  This allows us to see larger patterns.
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- subset(d, pg_pass=="pass") %>% group_by(rep, pass) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+
+ggplot(subset(r, rep<6), aes(pass, perc)) +geom_bar(stat="identity") + 
+  facet_wrap(~rep)+ ylab("pass rate")+
+  ggtitle("Pass rate by number of times repeating course")
+@
+
+
+It is important to keep in mind the scale of course repeating---quite small relative to the number of students taking courses for the first time.
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- subset(d, pg_pass=="pass") %>% group_by(rep, pass) %>% summarize(count=n()) %>% group_by(rep) %>% mutate(perc=count/sum(count))
+
+ggplot(subset(r, rep<6), aes(pass, count)) +geom_bar(stat="identity") + 
+  facet_wrap(~rep)+
+  ggtitle("Counts of students passing and not passing by number of times repeating course")
+@
+
+The above two plots indicate that (a) the numbers of students repeating courses was quite small relative to the overall population and (b) the percentage of students passing at repetition 1 - 3 was similar to the percentage passing when taking the course for the first time.  However, this relationship changes dramatically in the case of repeating the course for the fifth time (repetition = 4).
+
+How do pass rates vary by times taking the course and student characteristics?  Age was not a predictor of course repetition but gender and ethnicity were
+
+<<echo=FALSE, fig=T, height=8, width=8>>=
+r <- subset(d, pg_pass=="pass") %>% group_by(rep, pass, gender) %>% summarize(count=n()) %>% group_by(rep, gender) %>% mutate(perc=count/sum(count))
+
+ggplot(subset(r, rep<6), aes(pass, perc)) +geom_bar(stat="identity") + 
+  facet_grid(gender~rep)+
+  ggtitle("Pass rate by number of times repeating course and gender")
+
+
+@
+
+(The fluctuations at repetitions = 3 and 4 were due to small n.)  Women did especially well the first time repeating a course.
+
+
+<<echo=FALSE, fig=T, height=12, width=8>>=
+r <- subset(d, pg_pass=="pass") %>% group_by(rep, pass, ethnicity) %>% summarize(count=n()) %>% group_by(rep, ethnicity) %>% mutate(perc=count/sum(count))
+
+ggplot(subset(r, rep<4), aes(pass, perc)) +geom_bar(stat="identity") + 
+  facet_grid(ethnicity~rep)+
+  ggtitle("Pass rate by number of times repeating course and ethnicity")
+
+
+@
+
+(The fluctuations at repetitions = 2 and 3 were due to small n.)  Here we see obvious disparities in pass rates with African American and Pacific Islander students having lower than 50\% pass rates when taking math courses for the first time.  Asian, Caucasian and Hispanic students fared best when repeating a course.
+
+
+\section{Recommendations}
+
+Two points are worth emphasizing in light of the above material:
+
+\begin{enumerate}
+\item Students who repeat courses have decent success percentage-wise (the actual numbers involved were, of course, quite small).  At each course repetition prior to repetition = 4 students were able to convert about 60\% of the failures from the previous try into successes.  That means that for the students who repeated, .4 x .6 = .24  of the original failures (at repetition = 0) were converted into successes at repetition 1, .24 x .6 = .144 were converted into successes at repetition 2, and .144 x .6 = .086 were converted into successes at repetition 3.  So, by the time students  repeated a course 3 times, almost half (.24 + .14 + .09 = .47) of the initial failures for those students were converted into successes.  This is not to say that their time and success would not have been served better by a different approach, but in this case persistence does seem to pay off eventually.  There is perhaps a not-negligible cost, however, for those students who were never successful  and experienced repeated failure.
+\item The relationship between success and failure switches dramatically at repetition = 4.  The change in success rates suggests that repeating a course 4 times is futile.  If we are looking for a clear signal from the data about maximum number of course repetitions, this would be it.  A math department policy might be to require an advisor meeting after 1 unsuccessful course repeat (prior to repeating a course for the second time) to assess what is going wrong and how it might be addressed, and then to prohibit course repeats after the fourth unsuccessful attempt to pass (before repetition = 4).  At that point, the likelihood of not passing is far less than the likelihood of passing.
+\end{enumerate}
+
+
+\end{document}

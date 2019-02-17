@@ -1,0 +1,639 @@
+\documentclass{article} 
+\usepackage{fancyhdr}
+\usepackage{float}
+\addtolength{\headheight}{1.5cm} % make more space for the header
+\pagestyle{fancy} % use fancy for all pages except chapter start
+\rhead{\includegraphics[height=1.3cm,keepaspectratio]{logo.jpg}} % right logo
+\renewcommand{\headrulewidth}{0pt} % remove rule below header
+
+
+
+% \pagestyle{fancy}
+% \fancyhf{}
+% % \fancyhead[L]{Top Left}
+% % \fancyhead[C]{Top Center}
+% % \fancyhead[R]{Top Right}
+% % \renewcommand{\headrulewidth}{0.4pt}
+% % \fancyfoot[L]{Bottom Left}
+% % \fancyfoot[C]{\thepage}
+% % \fancyfoot[R]{Bottom Right}
+% \renewcommand{\footrulewidth}{0.4pt}
+
+\begin{document}
+
+%\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+\title{The Math Experiment:  Fall Semester, 2015}
+
+
+\author{Jeff Webb, SLCC Institutional Research}
+\maketitle
+
+\section{Introduction}
+
+Is course performance in the first three weeks of the semester---specifically, performance on early assignments and attendance---correlated with a student's eventual course grade?  SLCC's math department conducted an experiment to investigate this question during Fall 2015.  17 sections of Math 1010 were selected for the experiment. Instructors took  daily attendance during the first 3 weeks of the term (weekly thereafter) and administered early assessments, also in the first 3 weeks, in the form of quizzes, exams, graded homework, or other assignments.  This report summarizes the results of that experiment.
+
+\section{Summary of Results}
+
+\begin{enumerate}
+\item Attendance and performance data collected before the third week drop date was strongly associated with student course performance.  
+\item Adding a course late was also associated with student course performance.
+\item A predictive model using early attendance and performance data was 75\% accurate in predicting whether a student would pass the course.
+\end{enumerate}
+
+\section{Data}
+
+The experiment combined three data sources:  attendance data (both daily and weekly), early assignment data, and grade data.  The latter was from Banner, and was assembled by Institutional Research; the former two were collected from Canvas by eLearning.
+
+Details:
+
+\begin{itemize}
+\item The data included 17 sections taught by 9 instructors:  Diaz, Gardner, Merrill (Don), Quinto, Satcunasingam, Merrill (Darilyn), Gallegos, Schweitzer, Karren.
+\item No assignment information was collected from the sections taught by Darilynn Merrill. These sections were excluded from the analysis.  
+\item In total there were 576 students in 15 sections taught by 8 instructors.  
+\item Class sizes ranged from 30 to 72.
+\item Early attendance and early assignments were defined as prior to the third week census:  9/16/15.
+\item All the sections had different early assignments which were summarized in 2 calculated variables:  1.  Proportion of total points earned (earned/total possible), 2.  Proportion of assignments completed (completed/total). Thus the importance of the assignments has not been included in the analysis.
+\item Many of the sections had different possible days of early attendance, depending on class meeting days and missing data.  We summarized attendance as we did performance on assignments.  1.  Proportion of early classes attended, 2.  Proportion of total classes attended. 
+\item Marianne Tye in eLearning downloaded and organized the Canvas data.  She notes:  The attendance ``information came from Canvas.  The teachers were told to use the Attendance tool in canvas to take attendance.  For the first week or two I would go in to each class every day and download the attendance information then put it in the Google file.  After that I only did it once a week.  There are some days when the instructors didn't take attendance and I made note of that on their tab. As you scroll through the information you will occasionally see `no attendance available' show up in the list.''
+\item An interesting feature of the attendance data was that a student could not be marked absent if her name did not appear on the role.  So, the data inadvertently included information about which students added late.  A third variable was created to capture this information:  proportion of early classes that the student was eligible to attend:  classes attended/classes for which attendance data was recorded (present or absent). 
+\item The dependent variable for statistical analysis was a binary variable representing pass/fail.  Passing was defined as C or above.
+\item 7 students were represented in the early assignment/attendance data but were not in the Banner data, implying that they dropped before the third week census.
+\end{itemize}
+
+<<echo=FALSE, results=hide>>=
+
+library(readr)
+library(openxlsx)
+library(dplyr)
+library(Hmisc)
+
+cd <- read_csv("course_data.csv") #mypage, S#, and pidm
+head(data.frame(cd)) #pidm, s#, mypage
+
+#pull out prior grade metrics from exp_all_courses
+cda <-  read_csv("exp_all_courses.csv")
+names(cda)
+head(data.frame(cda))
+
+#convert to num grade; cumulative weighted gpa
+cd <- cda %>% select(pidm=PIDM, mp_id=SWTMIIS_MYPAGE, last=LAST, first=FIRST, ethnic=ETHN_DESC,
+                    gender=GENDER, age=AGE, crn=CRN, course=COURSE, section=SECTION, grade=GRADE,
+                    earned_creds=EARNED_CREDITS_PREVIOUS, att_creds=CREDITS_TERM) %>% 
+  group_by(mp_id)%>%
+  slice(1)
+
+#lookup table
+grade_lookup <- c("A"=4, "A-"=3.7, "B+"=3.4, "B"=3, "B-"=2.7, "C+"=2.4, "C"=2, "C-"=1.7, "D+"=1.4, "D"=1, "D-"=.7,"E"=0,"W"=0,"I"=0,"P"=2,"NG"=0,"AU"=0)
+
+cda$grade_num <- grade_lookup[cda$SFRSTCR_GRDE_CODE]  
+
+cda <- cda %>% select(mp_id=SWTMIIS_MYPAGE, cpt1=CPT1, cpt3=CPT3, term=SFRSTCR_TERM_CODE, cr=SFRSTCR_CREDIT_HR,
+                      grade=SFRSTCR_GRDE_CODE, grade_num, subj=SSBSECT_SUBJ_CODE, course=SSBSECT_CRSE_NUMB) 
+
+detach("package:dplyr", unload=TRUE)
+library(dplyr)
+
+cda1 <- cda %>% group_by(mp_id) %>% summarize(cpt1=first(cpt1), cpt3=first(cpt3))
+head(cda1)  
+
+cda2 <- cda %>% filter(subj=="MATH", term<201540)  %>% group_by(mp_id) %>% arrange(mp_id, term)%>%
+  summarize(last_math_grade=last(grade), math_gpa=round(weighted.mean(grade_num, w=cr, na.rm=T),2))
+cda2
+cda3 <- cda %>% filter(term<201540)  %>% group_by(mp_id) %>% arrange(mp_id)%>%
+  summarize(total_gpa=round(weighted.mean(grade_num, w=cr, na.rm=T),2))
+cda3
+grades <- left_join(cda2, cda1, by="mp_id")
+grades <- left_join(grades, cda3, by="mp_id")
+
+grades$cpt1 <- as.numeric(grades$cpt1)
+grades$cpt3 <- as.numeric(grades$cpt3)
+
+#impute missing values
+library(mice)
+grades_imp <- mice(data.frame(grades))
+grades <- complete(grades_imp)
+
+cd <- left_join(cd,grades,by="mp_id")
+cd
+#Assignment data
+sections <- getSheetNames("exp_data1.xlsx")
+ sections <- c("Diaz_002","Gardner" ,"MerrillDon_012","Quinn","Satcunasingam_016",   "MerrillDon_020",
+               "Satcunasingam_028",   "MerrillDarilyn_033",  "MerrillDarilyn_039",  "Gallegos_045","Gallegos_047",
+               "Schweitzer_050","Schweitzer_051",      "Karren_063" )
+
+ #extract sheets
+ d <- list()
+ for (i in 1:length(sections)){
+   d[[i]] <- read.xlsx("exp_data1.xlsx", sheet = i)
+ } 
+
+i
+head(d[[i]])
+i=i+1
+
+head(d[[1]]) #SIS user id
+d[[2]]
+d[[11]]
+
+#two sections have no information:  d[[8]] and d[[9]]
+
+#Calculate performance metrics on the grade sheets, but need to tidy up first.
+#Two metrics of interest:  %completed, %achieved
+
+p <- NULL
+for (i in 1:length(d)){
+  t <- d[[i]]
+  t <- t[which(t[,1]=="Points Possible"):nrow(t),]
+    
+  if(i==8 | i==9) next
+  
+  for (j in 4:ncol(t)){
+      t[,j] <- as.numeric(t[,j])
+  }
+    
+  t$perc_a <- rowSums(as.matrix(t[, 4:ncol(t)]), na.rm=T)/rowSums(as.matrix(t[1, 4:ncol(t)]), na.rm=T)
+  fun <- function(x) length(x[which(is.na(x))])
+  t$perc_c <- 1-(apply(as.matrix(t[, 4:ncol(t)]), FUN=fun, MARGIN = 1)/ncol(t[, 4:ncol(t)]))
+  t$index <- i
+  names(t)[2:3] <- c("id","mp_id")
+  p <- rbind(p, t[-1,c("id", "mp_id","perc_a","perc_c","index")])
+cat(i, "\r")
+} 
+
+p
+
+which(duplicated(p$id))
+p <- p[-which(p$id==1358749)[1],]
+subset(cd, mp_id=="gclapie")
+
+#Attendance data
+dex <- read_csv("002_Diaz.csv")
+
+head(data.frame(dex),20)
+
+#Looks like per meeting data, then weekly.  could calculate percentge attended based on the unique values
+#why discrepancy between 
+
+#objective:  is attendance predictive of grade outcome?  is early grade on the assessment predictive of grade? Working here within the 
+#universe of these courses.
+
+#need to use third week to define early attendance.
+
+#2015 last day to drop -- 9/16/2015?
+
+#strngr example: counting backwards
+# x <- "some text in a string"
+# str_sub(x,-6,-1)
+# [1] "string"
+
+#One of the complications in the attendance data is that some students have missing attendance information,
+#which is likely related to a late add.  Two possible calculations here:  1.  attendance as a percent of available
+#2.  attendance as a percent of possible.  The second case could misrepresent student engagement but might also 
+#realistically present the cost of having missed some classes due to late add. Could do some analysis of that difference.
+
+t <- read_csv("002_Diaz.csv")
+data.frame(t[which(t[,7]==400789),]) #he should be 100%, attendance
+data.frame(t[which(t[,7]==245123),])
+data.frame(t[which(t[,7]==383247),])
+data.frame(t[which(t[,7]==673256),])
+data.frame(t[which(t[,7]==345707),])
+
+calc_attendance <- function(data, third_week="9/16/2015"){
+  library(dplyr)
+  library(stringr)
+  library(readr)
+  d <- data.frame(data) %>% select(cid=Course.ID, crn=SIS.Course.ID, teacher=Teacher.ID, id=Student.ID, name=Student.Name, date=Class.Date, attendance=Attendance) %>%
+    filter(!is.na(id)) %>% mutate(crn=as.numeric(str_sub(crn, -12,-8)) )
+  d$date <- as.Date(d$date, format="%m/%d/%Y")
+  last_day <- as.Date(third_week, format="%m/%d/%Y")
+  d$attendance_bin <- ifelse(d$attendance=="present",1,0)
+  
+  total <- d %>% 
+    group_by(id) %>% 
+    summarize(cid=first(cid), crn=first(crn), teacher=first(teacher), name=first(name),count=n(), perc_attendance=round(mean(attendance_bin),2)) %>%
+    mutate(max_count=max(count), perc_count=round(count/max_count,2))
+   
+   early <- subset(d, date < last_day) %>% 
+     group_by(id) %>% 
+     summarize(cid=first(cid), crn=first(crn), teacher=first(teacher), name=first(name),count=n(), perc_attendance=round(mean(attendance_bin),2)) %>%
+     mutate(max_count=max(count), perc_count=round(count/max_count,2))
+   
+   list(total=data.frame(total), early=data.frame(early), data=data.frame(d) )
+   
+}
+
+#head(calc_attendance(read_csv("002_Diaz.csv"))$data)
+
+d_early <- rbind(calc_attendance(read_csv("002_Diaz.csv"))$early,
+                 calc_attendance(read_csv("012_MerrillDon.csv"))$early,
+                 calc_attendance(read_csv("016_Satcunasingam.csv"))$early,
+                 calc_attendance(read_csv("020_MerrillDon.csv"))$early,
+                 calc_attendance(read_csv("028_Satcunasingam.csv"))$early,
+                 calc_attendance(read_csv("029_Quinn.csv"))$early,
+                 calc_attendance(read_csv("033_MerrillDarilyn.csv"))$early,
+                 calc_attendance(read_csv("039_MerrillDarilyn.csv"))$early,
+                 calc_attendance(read_csv("045_Gallegos.csv"))$early,
+                 calc_attendance(read_csv("047_Gallegos.csv"))$early,
+                 calc_attendance(read_csv("050_Schweitzer.csv"))$early,
+                 calc_attendance(read_csv("051_Schweitzer.csv"))$early,
+                 calc_attendance(read_csv("063_Karren.csv"))$early)
+
+names(d_early) <- c("id","cid" ,"crn" ,"teacher", "name" ,"count_early" ,         
+                    "perc_attendance_early", "max_count_early","perc_count_early"  )
+head(d_early)                                            
+d_total <- rbind(calc_attendance(read_csv("002_Diaz.csv"))$total,
+                 calc_attendance(read_csv("012_MerrillDon.csv"))$total,
+                 calc_attendance(read_csv("016_Satcunasingam.csv"))$total,
+                 calc_attendance(read_csv("020_MerrillDon.csv"))$total,
+                 calc_attendance(read_csv("028_Satcunasingam.csv"))$total,
+                 calc_attendance(read_csv("029_Quinn.csv"))$total,
+                 calc_attendance(read_csv("033_MerrillDarilyn.csv"))$total,
+                 calc_attendance(read_csv("039_MerrillDarilyn.csv"))$total,
+                 calc_attendance(read_csv("045_Gallegos.csv"))$total,
+                 calc_attendance(read_csv("047_Gallegos.csv"))$total,
+                 calc_attendance(read_csv("050_Schweitzer.csv"))$total,
+                 calc_attendance(read_csv("051_Schweitzer.csv"))$total,
+                 calc_attendance(read_csv("063_Karren.csv"))$total)        
+
+names(d_total) <- c("id","cid" ,"crn" ,"teacher", "name" ,"count_total" ,         
+                    "perc_attendance_total", "max_count_total","perc_count_total"  )
+
+
+#joins: d_early + d_total (by id) + p (by id)+ cd (by my page login)
+#d_early + d_total + p =d
+
+temp1 <- left_join(d_early[,c(1,6:9)],d_total[,c(1,6:9)], by="id")
+head(temp1)
+any(duplicated(temp1))
+head(p)
+d <- left_join(p, temp1, by="id")
+any(duplicated(d))
+d <- left_join(d, cd, by="mp_id")
+head(d,40)
+
+
+#################
+#analysis:  
+
+names(d)
+summary(d$perc_a)
+summary(d$perc_c) #this will be difficult to fit.--mostly 1s
+summary(d$perc_attendance_early)
+
+i=1
+subset(d, index==i)
+i=i+1
+
+write_csv(data.frame(ids=d[which(d$index==2), "id"]), "missing_ids.csv")
+
+subset(d, id==1358749)
+#create binary pass variable
+names(d)
+d$pass <- 0
+d$pass[which(d$grade=="A"|
+               d$grade=="A-"|
+               d$grade=="B+"|
+               d$grade=="B"|
+               d$grade=="B-"|
+               d$grade=="C+"|
+               d$grade=="C")] <- 1
+
+factor(d$grade)
+d$grade <- factor(d$grade, levels=c("A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "E", "W"))
+
+table(d$section)
+
+d$grade_num <- grade_lookup[d$grade] 
+
+mean(d$grade_num, na.rm=T)
+max(table(d$grade))
+
+d %>% group_by(section) %>% summarize(mean(pass))
+@
+
+\section{Experimental design}
+
+This experiment was run prospectively, but the design included no controls.  Nor were instructors or students randomly selected. In fact, aside from  including early assessments and collecting attendance data, there was nothing different about these sections.  The instructors were advised to teach as they normally would.  The design can therefore be regarded as observational or quasi-experimental.  
+
+There were no controls on the assignments.  They ranged from introductory-type assignments (``Introduce yourself!''), to graded homework to in-class assignments to first exams.
+
+The observational design nevertheless seems sufficient to answer the research question that prompted the experiment: was early attendance/performance associated with passing the course?   Did those students with better attendance/performance records early in the semester tend to do better in the course?
+
+
+\section{Results}
+
+We used multilevel logistic models to perform  statistical analysis of experimental data, with section as the second-level grouping variable. (It was important to control for differences between sections, especially given the range of assignment types summarized in the early performance variables.)  Grade data is not typically normally distributed, which violates the assumptions of a linear model.  It made sense therefore to transform  grade data into a binary variable (pass/fail), which is what we did here.  Some power was lost with this transformation but the model fit was better.
+
+\subsection{Course grade performance}
+
+The mean grade in the course was \Sexpr{round(mean(d$grade_num, na.rm=T), 2)}, while the most common grade was an ``E'' (103) followed by an ``A'' (67).  As noted above, grade performance was transformed into a binary pass/fail variable. The pass rate in these sections was \Sexpr{round(mean(d$pass, na.rm=T), 2)}.  Section level pass rates varied from 39\% to 82\%.
+
+\subsection{Early performance}
+
+The average performance on early assignments was \Sexpr{round(mean(d$perc_a, na.rm=T), 2)} and the standard deviation was \Sexpr{round(sd(d$perc_a, na.rm=T), 2)}.
+
+
+<<echo=FALSE, results=hide>>=
+length(which(is.na(d$grade)))/nrow(d)
+cols=c("#FFCD00", "#00ABE1")
+
+library(rstanarm)
+library(arm)
+
+names(d)
+
+d$last_math_grade[which(is.na(d$last_math_grade))] <- "none"
+
+d %>% group_by(last_math_grade) %>% summarize(mean(pass),n())
+d %>% group_by(round(math_gpa)) %>% summarize(mean(pass),n())
+d$math_gpa_cat <- round(d$math_gpa)
+d$math_gpa_cat <- ifelse(d$math_gpa_cat==0,"E",
+                         ifelse(d$math_gpa_cat==1,"D",
+                                ifelse(d$math_gpa_cat==2,"C",
+                                       ifelse(d$math_gpa_cat==3,"B",
+                                              ifelse(d$math_gpa_cat==4,"A", "none")))))
+d$math_gpa_cat[which(is.na(d$math_gpa_cat))] <- "none"
+d %>% group_by(math_gpa_cat) %>% summarize(mean(pass),n())
+
+m <- glmer(pass~perc_a+(1 | section), data=d, family="binomial")
+
+# ms <- stan_glmer(pass~perc_a+(1 | section), data=d, family="binomial")
+# launch_shinystan(ms)
+# prop.table(table(posterior_predict(ms)))
+# 
+# summary(posterior_predict(ms, newdata=data.frame(pass=1, perc_a=.5, section="015"), draws=1000))
+# summary(m)
+# coef(m)
+# p <- ranef(m)$section
+# median(p[,1])
+# exp(p)/(1+exp(p))
+# summary(d$perc_a)
+# mean(d$perc_a)
+
+p50 <- predict(m, newdata=data.frame(perc_a=.5, section="015"))
+exp(p50)/(1+exp(p50)) #pass rate=23%
+
+p75 <- predict(m, newdata=data.frame(perc_a=.75, section="015"))
+exp(p75)/(1+exp(p75))
+
+p100 <- predict(m, newdata=data.frame(perc_a=1, section="015"))
+exp(p100)/(1+exp(p100))
+
+@
+
+The variable for early performance was strongly associated with course grade.  The model predicted that the pass rate for students who earned 50\% on the early assignments in the median section would be 23\% on average, for those who earned 75\% the pass rate would be 55\%, and for those who earned 100\% the pass rate would be 84\%.
+
+This strong relationship between early performance and passing is illustrated in the following plot showing the relationship between early performance and course grade. 
+
+
+<<echo=FALSE, fig=T>>=
+library(ggplot2)
+
+ggplot(d, aes(perc_a, grade_num))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F) + xlab("early performance")+
+  ylab("course grade") + ggtitle("Course Grade by Early Performance, Math 1010, Fall 2015")
+
+#  ggplot(d, aes(perc_a, grade_num))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F) + xlab("total attendance")+
+#    ylab("course grade") + ggtitle("Course Grade by Total Attendance, Math 1010, Fall 2015")+ facet_wrap(~math_gpa_cat)
+
+
+# ggplot(d, aes(math_gpa, perc_a))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F)
+  
+@
+
+The gold line represents a smoothed average.  Visually it is clear that almost no students who earned less than 50\% on early assignments passed the course.
+
+\subsection{Early attendance}
+
+
+
+<<echo=F, results=hide>>=
+names(d)
+summary(d$max_count_early)
+summary(d$perc_attendance_early)
+d[which(d$max_count_early==11),"section"]
+
+(m1 <- glmer(pass~perc_attendance_early + (1|section), data=d, family=binomial))
+median(ranef(m1)$section[,1])
+
+p50 <- predict(m1, newdata=data.frame(perc_attendance_early=.5, section="015"))
+exp(p50)/(1+exp(p50)) #pass rate=23%
+
+p75 <- predict(m1, newdata=data.frame(perc_attendance_early=.75, section="015"))
+exp(p75)/(1+exp(p75))
+
+p100 <- predict(m1, newdata=data.frame(perc_attendance_early=1, section="015"))
+exp(p100)/(1+exp(p100))
+@
+
+Depending on the class and data collection, the number of class periods before the third week census ranged from 5 to 11. On average students attended 90\% of the class meetings.  Note that this percentage was calculated using the classes that students were \emph{eligible} to attend.  If a student added the class late, but then attended all the meetings after adding, that student's attendance record would be 100\%.
+
+Early attendance was strongly associated with course passing. The model predicted that the pass rate for students who attended 50\% of the early classes in the median section would be 17\% on average, for those who attended 75\% the pass rate would be 41\%, and for those who attended 100\% the pass rate would be 70\%.
+
+The following plot illustrates this result. 
+
+
+<<echo=FALSE, fig=T>>=
+library(ggplot2)
+
+ggplot(d, aes(perc_attendance_early, grade_num))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F) + xlab("early attendance")+
+  ylab("course grade") + ggtitle("Course Grade by Early Attendance, Math 1010, Fall 2015")
+
+#  ggplot(d, aes(perc_attendance_early, grade_num))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F) + xlab("total attendance")+
+#    ylab("course grade") + ggtitle("Course Grade by Total Attendance, Math 1010, Fall 2015")+ facet_wrap(~math_gpa_cat)
+
+
+# ggplot(d, aes(math_gpa, perc_a))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F)
+  
+@
+
+\subsection{Total attendance}
+
+While not a focus of this experiment, total attendance was also strongly associated with grade performance.  Attendance was recorded daily until the third week census, and was recorded weekly thereafter. Due to differences in course schedules and data collection, the maximum number of classes ranged from 23 to 54.  The average number of classes attended was 79\%.
+
+
+
+<<echo=F, results=hide>>=
+names(d)
+summary(d$max_count_total)
+summary(d$perc_attendance_total)
+
+@
+
+
+Total attendance was even more strongly associated with course performance than early attendance was, as the following plot illustrates. 
+
+
+<<echo=FALSE, fig=T>>=
+library(ggplot2)
+
+ggplot(d, aes(perc_attendance_total, grade_num))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F) + xlab("total attendance")+
+  ylab("course grade") + ggtitle("Course Grade by Total Attendance, Math 1010, Fall 2015")
+
+# ggplot(d, aes(perc_attendance_total, grade_num))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F) + xlab("total attendance")+
+#   ylab("course grade") + ggtitle("Course Grade by Total Attendance, Math 1010, Fall 2015")+ facet_wrap(~math_gpa_cat)
+
+# ggplot(d, aes(math_gpa, perc_a))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F)
+  
+@
+
+Almost no students with attendance below 50\% passed the course.
+
+\subsection{Late adds}
+
+Students who added the course late  missed early class meetings.  These missed meetings were not  represented as absences in attendance records.  Rather, students simply weren't included on the class roll.    The difference between the maximum possible meetings for a given section and the maximum possible for individual students in those sections thus represents a count of classes missed due to late adds.  This count allows us to address the question of whether adding a course late was associated with course performance.
+
+65 students added late according to this counting method.  The median  classes attended by these students was 60\%.
+
+<<echo=F, results=hide>>=
+names(d)
+summary(d$perc_count_early)
+length(d$perc_count_early[which(d$perc_count_early <1)])
+min(d$perc_count_early[which(d$perc_count_early <1)])
+max(d$perc_count_early[which(d$perc_count_early <1)])
+summary(d$perc_count_early[which(d$perc_count_early <1)])
+
+(m3 <- glmer(pass~perc_count_early + (1|section), data=d, family=binomial))
+median(ranef(m3)$section[,1])
+
+p50 <- predict(m3, newdata=data.frame(perc_count_early=.5, section="015"))
+exp(p50)/(1+exp(p50)) #pass rate=23%
+
+p75 <- predict(m3, newdata=data.frame(perc_count_early=.75, section="015"))
+exp(p75)/(1+exp(p75))
+
+p100 <- predict(m3, newdata=data.frame(perc_count_early=1, section="015"))
+exp(p100)/(1+exp(p100))
+
+@
+
+
+Late adding was associated with course performance but less strongly than for early performance and attendance. The model predicted that the pass rate for students who attended 50\% of the early classes in the median section due to late adding would be 41\% on average, for those who attended 75\% the pass rate would be 51\%, and for those who attended 100\% the pass rate would be 61\%.
+
+
+<<echo=F, fig=T>>=
+library(ggplot2)
+
+ggplot(d, aes(perc_count_early, grade_num))+ geom_jitter(col=cols[2])+geom_smooth(method="lm", col=cols[1], se=T) + xlab("total attendance")+
+  ylab("course grade") + ggtitle("Course Grade by Total Attendance, Math 1010, Fall 2015")
+
+# ggplot(d, aes(math_gpa, perc_a))+ geom_jitter(col=cols[2])+geom_smooth(span=.8, col=cols[1], se=F)
+
+# ggplot(d, aes(perc_count_early, grade_num))+ geom_jitter(col=cols[2])+geom_smooth(method="lm", col=cols[1], se=T) + xlab("total attendance")+
+#   ylab("course grade") + ggtitle("Course Grade by Total Attendance, Math 1010, Fall 2015") + facet_wrap(~math_gpa_cat)
+  
+@
+
+Obviously, this relationship was noisy, but the gold line, representing the linear fit, did have positive slope.  Some students who added late did fine in the course, but the majority who missed half or more of the early classes performed poorly.
+
+\section{Prediction}
+
+The models used above find significant relationships between variables within the sample, but how well do they predict?  The point of finding early indicators, after all, would be to identify students in advance who would benefit from  intervention.
+
+We used cross-validation to estimate out of sample performance for a model that included all of the early performance metrics.  The validation set consisted in 30\% of the sample.  We  trained the model  using a machine learning algorithm, which we then used to predict student course performance on the validation set.  Variables used included:
+
+\begin{itemize}
+\item Early assignment performance
+\item Early attendance
+\item Age
+\item Earned credits as of the prior term 
+\item Attempted credits for current term
+\item Math GPA (an average of all previous math grades,``none'' if the first math course)
+\end{itemize}
+
+(Notably, early performance was the strongest predictor in the model, selected 100\% of the time by the algorithm---remarkably, better even than the math GPA variable.)
+
+The goal should be to minimize the false positive rate.  Not all errors are equally important.  False positives---predicting incorrectly that a student will pass---would be a bigger problem in an educational context than false negatives.  If we predict incorrectly that a student will fail---a false negative---we may trigger an unneeded intervention, but extra help never hurt anyone.  False positives, however, represent a missed opportunity.
+
+Overall, the model  had 75\% accuracy in predicting course performance.  It correctly classified 129 students of of 172.  Of the 69 students who did not pass, the model incorrectly predicted 26 of them---students who could have used help but wouldn't have gotten it based on the prediction. The false positive rate was thus 38\%.   
+
+<<echo=F, results=hide>>=
+
+# library(xgboost)
+# library(caret)
+# 
+# d$pass1 <- ifelse(d$pass==0, "F", "P")
+# d$pass1 <- factor(d$pass1)
+# dsub <- d[,c("pass","pass1","perc_a","perc_attendance_early","age","earned_creds","att_creds","math_gpa_cat")]
+# pp <- preProcess(dsub, method="bagImpute")
+# pp <- predict(pp, newdata=dsub)
+# tind <- createDataPartition(pp$pass1, p=.6, list=F)
+# 
+# train <- pp[tind,]
+# test <- pp[-tind,]
+# 
+# fitControl <- trainControl(## 10-fold CV
+#                            method = "repeatedcv",
+#                            number = 10,
+#                            ## repeated ten times
+#                            repeats = 10,
+#                            summaryFunction = twoClassSummary)
+# set.seed(825)
+# names(train)
+# gbmFit1 <- train(pass1 ~ perc_a*perc_attendance_early+age+earned_creds+att_creds+math_gpa_cat, data = train,
+#                  method = "gbm",
+#                  trControl = fitControl,
+#                  ## This last option is actually one
+#                  ## for gbm() that passes through
+#                  verbose = T,
+#                  metric = "Spec",
+#                 maximize=T)
+# varImp(gbmFit1)
+# predict(gbmFit1, newdata = test)
+# 
+# confusionMatrix(gbmFit1)
+# confusionMatrix(predict(gbmFit1, newdata = test), test$pass1)
+# 
+# nnFit1 <- train(pass1 ~ perc_a+perc_attendance_early+age+earned_creds+att_creds+math_gpa_cat, data = train,
+#                  method = "nnet",
+#                  trControl = fitControl,
+#                  ## This last option is actually one
+#                  ## for gbm() that passes through
+#                  verbose = T)
+# 
+# confusionMatrix(predict(nnFit1, newdata = test, type="raw"), test$pass1)
+# 
+# svmFit1 <- train(pass1 ~ perc_a+perc_attendance_early+age+earned_creds+att_creds+math_gpa_cat+math_gpa_cat, data = train,
+#                  method = "svmLinear",
+#                  trControl = fitControl,
+#                  ## This last option is actually one
+#                  ## for gbm() that passes through
+#                  verbose = T)
+# 
+# confusionMatrix(predict(svmFit1, newdata = test, type="raw"), test$pass1)
+# 
+# Fit1 <- train(pass1 ~ perc_a*perc_attendance_early*age+earned_creds+att_creds+math_gpa_cat+math_gpa_cat, data = train,
+#                  method = "xgbLinear",
+#                  trControl = fitControl,
+#                  verbose = T, 
+#               metric = "Spec",
+#                 maximize=T)
+# 
+# 
+# confusionMatrix(predict(Fit1, newdata = test), test$pass1)
+# 
+# confusionMatrix(as.character(ifelse(predict(glm(pass1 ~ perc_a*perc_attendance_early+age+earned_creds+att_creds+math_gpa_cat+math_gpa_cat , data=train, family=binomial),
+#         newdata=test)>0,"P","F")), test$pass1)
+
+@
+
+
+<<echo=F, results=hide>>=
+
+# library(pROC)
+# 
+# p <- predict(Fit1, newdata = test)
+# p <- ifelse(predict(Fit1, newdata = test)=="F",0,1)
+# r <- ifelse(test$pass1=="F",0,1)
+# roc(p,r, plot=T)
+
+@
+
+\section{Discussion}
+
+The experiment demonstrated that early performance and attendance indicators were strongly associated with course performance. Moreover, a model with additional variables did a reasonable job of predicting course performance in a validation sample.  In sum, by the third week census we should be able to predict whether a student will pass or fail the course with something like  75\% accuracy, and---more importantly---a 37\% false positive rate.
+
+
+
+\end{document}

@@ -1,0 +1,239 @@
+\documentclass{article} 
+\usepackage{fancyhdr}
+\usepackage{float}
+\addtolength{\headheight}{1.5cm} % make more space for the header
+\pagestyle{fancy}{} % use fancy for all pages except chapter start
+\rhead{\includegraphics[height=1.3cm,keepaspectratio]{logo.jpg}} % right logo
+\renewcommand{\headrulewidth}{0pt} % remove rule below header
+
+\begin{document}
+
+%\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+\title{What If:  Analysis of CPT Score Minimums}
+
+
+\author{Jeff Webb, SLCC Institutional Research}
+\maketitle
+
+\section{Introduction}
+
+Suzanne Mozdy, Math AD, asked about the effect on pass rates of changes to required minimum CPT scores.  Specifically, this spring the Math Department made the following changes:
+
+\begin{itemize}
+\item Math 1030 cut score College Level Math (CPT 5) previously set at 43 changed to 40 (new change takes it down to Elementary Algebra (CPT4) > 70)
+\item Math 1040 cut score was College Level Math (CPT 5) previously set at 43 changed to 50
+\item Math 1050 cut score was College Level Math (CPT 5) previously set at 43 changed to 55
+\end{itemize}
+
+These are questions that can be addressed generally for these courses using historical data.  In what follows I offer a ``what if'' analysis of pass rates at different CPT minimums for Math 1030, 1040 and 1050.
+
+\section{Data}
+
+The data used here is the ``churn'' dataset re-purposed to focus on math performance and includes student level data on students and courses for spring and fall cohorts between (and inclusive of) 200740 and 201540.  The data thus includes multiple rows per student, with each row documenting a separate course enrollment.
+
+<<echo=FALSE, results=hide>>=
+source("le1020_functions.R")
+library(dplyr)
+library(readr)
+library(Hmisc)
+library(ggplot2)
+library(lme4)
+
+setwd("~/Documents/OneDriveBusiness/churn")
+dd1 <- read_csv("Churn_early_20160426.csv")
+dd2 <- read_csv("Churn_late_20160426.csv")
+setwd("~/Documents/OneDriveBusiness/LE1020")
+
+names(dd1); names(dd1) <- tolower(names(dd1))
+names(dd2); names(dd2) <- tolower(names(dd2))
+
+table(dd2$sfrstcr_grde_code)
+dd2 <- dd2[-which(is.na(dd2$sfrstcr_grde_code) | dd2$sfrstcr_grde_code=="EX" | dd2$sfrstcr_grde_code=="NS" | 
+                  dd2$sfrstcr_grde_code=="NG" | dd2$sfrstcr_grde_code=="AU" | dd2$sfrstcr_grde_code=="M"),]
+table(dd1$sfrstcr_grde_code)
+dd1 <- dd1[-which(is.na(dd2$sfrstcr_grde_code) | dd2$sfrstcr_grde_code=="EX" | dd2$sfrstcr_grde_code=="NS" | 
+                  dd2$sfrstcr_grde_code=="NG" | dd2$sfrstcr_grde_code=="AU"),]
+
+
+dd1 <- dd1 %>% select(id, name=last_name, term=term_code, cohort= academic_period, subject=ssbsect_subj_code, 
+                      course=ssbsect_crse_numb, grade=sfrstcr_grde_code,  arith_score=cpt_arithmetic_score,
+                      elem_score=cpt_elem_score,
+                      math_score=cpt_math_score) %>%
+  arrange(id, term) %>%
+  mutate(class=paste0(subject,course))
+
+dd2 <- dd2 %>% select(id, name=last_name, term=term_code, cohort= academic_period, subject=ssbsect_subj_code, 
+                      course=ssbsect_crse_numb, grade=sfrstcr_grde_code,  arith_score=cpt_arithmetic_score,
+                      elem_score=cpt_elem_score,
+                      math_score=cpt_math_score) %>%
+  arrange(id, term) %>%
+  mutate(class=paste0(subject,course))
+
+dd <- rbind(dd1,dd2)
+
+#change grades
+dd$grade[which(dd$grade=="W")] <- "E"
+dd$grade[which(dd$grade=="I")] <- "E"
+dd$grade[which(dd$grade=="P")] <- "C"
+
+dd$grade_num <- convert_grade(dd$grade)
+dd$pass <- ifelse(dd$grade_num>1.99,1,0)
+
+unique(subset(dd, subject=="MATH")$class)
+table(subset(dd, subject=="MATH")$class)
+
+dd <- subset(dd, subject=="MATH")
+
+dd$cpt5_bin <- ifelse(is.na(dd$math_score), 1, 0)
+course_tally <- dd %>% group_by(course, cohort) %>% summarize(count=n(), perc_missing=mean(cpt5_bin), num_missing=sum(cpt5_bin))
+data.frame(course_tally)
+subset(course_tally, course==1030)
+subset(course_tally, course==1040)
+
+dd <- dd %>% group_by(id) %>% arrange(term) %>% slice(1)
+
+course_tally <- dd %>% group_by(course, cohort) %>% tally
+subset(course_tally, course==1030)
+subset(course_tally, course==1040)
+
+length(which(is.na(subset(dd, class=="MATH1030")$math_score)))/nrow(subset(dd, class=="MATH1030")) 
+length(which(is.na(subset(dd, class=="MATH1040")$math_score)))/nrow(subset(dd, class=="MATH1040"))
+length(which(is.na(subset(dd, class=="MATH1050")$math_score)))/nrow(subset(dd, class=="MATH1050"))
+
+t_1030 <- subset(dd, class=="MATH1030") %>% mutate(math_score=as.numeric(math_score))
+t_1040 <- subset(dd, class=="MATH1040") %>% mutate(math_score=as.numeric(math_score))
+t_1050 <- subset(dd, class=="MATH1050") %>% mutate(math_score=as.numeric(math_score))
+
+describe(t_1030$math_score)
+@
+
+During this period there were 1008 duplicated enrollments in 1030, 2094 in 1040, and 7174 in 1050.   But if we look only at students taking math for the first time at the college (for whom CPT is relevant) and who have a CPT score then the numbers are much lower:  204 for 1030, 464 for 1040 and 1487 for 1050.
+
+The relevant CPT score for these classes is College Level Math or CPT5.  There are missing CPT5 values.  Among students taking these courses for the first time, around 25\% of CPT5 values were missing for 1030, around 30\% missing for 1040, and almost 50\% missing for 1050. 
+
+Not passing was defined as C- or below, including grades of I and W.  
+
+\section{Results}
+
+Setting a minimum score has at least two impacts:  it curtails access, limiting the number of students who might otherwise take the course, and it improves performance, boosting pass rates.  These two together must be considered when setting a policy for CPT cutoff.  In the following the plots, the x-axis represents the CPT5 scores that are in the data (there may be unrepresented scores, hence gaps in the sequence).  The y-axis represents a counter-factual:  the top plot shows the resulting number of qualifying students had the minimum CPT score been set at the corresponding x-axis value; the bottom plot shows  the resulting pass rate would had the minimum CPT score been set at the corresponding x-axis value.  See the plots for each class.
+
+<<echo=FALSE, fig=TRUE>>=
+
+library(ggthemes)
+c <- c("#00ABE1","#FFCD00")
+sa <- as.numeric(na.omit(unique(as.numeric(t_1030$math_score))))
+sa <- sa[order(sa)]
+
+#length(which(is.na(t_1030$math_score)))/length(t_1030$math_score)
+
+
+cpt <- data.frame(sa=sa, n=0, pass=0, fail=0, avg=0)
+for(i in 1: (length(sa)-1)){
+  df <- subset(t_1030, math_score>sa[i])
+  cpt[i,2] <- nrow(df)
+  cpt[i, 3] <- sum(subset(t_1030, math_score>sa[i])$pass, na.rm=T)
+  cpt[i, 4] <- cpt[i,2] -cpt[i,3] 
+  cpt[i, 5] <- mean(subset(t_1030, math_score>sa[i])$pass, na.rm=T)
+  
+}
+r <- subset(cpt, n >5)
+
+ g1 <- ggplot(r, aes(factor(sa), n))  + geom_point(color=c[1]) + xlab("CPT5 Threshold") +  ylab("Number of Students") + 
+  theme_classic() + ggtitle("Math 1030")+geom_smooth(color=c[2], method=lm, se=F) 
+
+g2 <- ggplot(r, aes(factor(sa), avg))  + geom_point(color=c[1]) + xlab("CPT5 Threshold") +  ylab("Pass Rate") + theme_classic() + 
+geom_smooth(color=c[2], method=lm, se=F)
+
+library(gridExtra)
+grid.arrange( g1, g2, ncol=1)
+
+
+
+@
+
+
+
+<<echo=FALSE, fig=TRUE>>=
+
+library(ggthemes)
+c <- c("#00ABE1","#FFCD00")
+sa <- as.numeric(na.omit(unique(as.numeric(t_1040$math_score))))
+sa <- sa[order(sa)]
+
+#length(which(is.na(t_1040$math_score)))/length(t_1040$math_score)
+
+
+cpt <- data.frame(sa=sa, n=0, pass=0, fail=0, avg=0)
+for(i in 1: (length(sa)-1)){
+  df <- subset(t_1040, math_score>sa[i])
+  cpt[i,2] <- nrow(df)
+  cpt[i, 3] <- sum(subset(t_1040, math_score>sa[i])$pass, na.rm=T)
+  cpt[i, 4] <- cpt[i,2] -cpt[i,3] 
+  cpt[i, 5] <- mean(subset(t_1040, math_score>sa[i])$pass, na.rm=T)
+  
+}
+r <- subset(cpt, n >5)
+
+ g1 <- ggplot(r, aes(factor(sa), n))  + geom_point(color=c[1]) + xlab("CPT5 Threshold") +  ylab("Number of Students") + 
+  theme_classic() + ggtitle("Math 1040")+
+geom_smooth(color=c[2], method=lm, se=F) 
+
+g2 <- ggplot(r, aes(factor(sa), avg))  + geom_point(color=c[1]) + xlab("CPT5 Threshold") +  ylab("Pass Rate") + theme_classic() + 
+geom_smooth(color=c[2], method=lm, se=F)
+
+library(gridExtra)
+grid.arrange( g1, g2, ncol=1)
+
+
+
+@
+
+
+<<echo=FALSE, fig=TRUE>>=
+
+library(ggthemes)
+c <- c("#00ABE1","#FFCD00")
+sa <- as.numeric(na.omit(unique(as.numeric(t_1050$math_score))))
+sa <- sa[order(sa)]
+
+#length(which(is.na(t_1050$math_score)))/length(t_1050$math_score)
+
+
+cpt <- data.frame(sa=sa, n=0, pass=0, fail=0, avg=0)
+for(i in 1: (length(sa)-1)){
+  df <- subset(t_1050, math_score>sa[i])
+  cpt[i,2] <- nrow(df)
+  cpt[i, 3] <- sum(subset(t_1050, math_score>sa[i])$pass, na.rm=T)
+  cpt[i, 4] <- cpt[i,2] -cpt[i,3] 
+  cpt[i, 5] <- mean(subset(t_1050, math_score>sa[i])$pass, na.rm=T)
+  
+}
+r <- subset(cpt, n >5)
+
+ g1 <- ggplot(r, aes(factor(sa), n))  + geom_point(color=c[1]) + xlab("CPT5 Threshold") +  ylab("Number of Students") + 
+  theme_classic() + ggtitle("Math 1050")+
+geom_smooth(color=c[2], method=lm, se=F) 
+
+g2 <- ggplot(r, aes(factor(sa), avg))  + geom_point(color=c[1]) + xlab("CPT5 Threshold") +  ylab("Pass Rate") + theme_classic() + 
+geom_smooth(color=c[2], method=lm, se=F)
+
+library(gridExtra)
+grid.arrange( g1, g2, ncol=1)
+
+
+
+@
+
+\section{Discussion}
+
+\begin{itemize}
+\item The number of students taking these courses who have a CPT score are relatively modest.
+\item Higher CPT5 scores are correlated with higher pass rates.
+\item Any policy that sets a minimum CPT cutoff should consider also the number of students affected.
+\end{itemize}
+
+
+
+\end{document}
